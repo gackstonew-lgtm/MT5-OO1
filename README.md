@@ -2,10 +2,11 @@
 
 [![Platform](https://img.shields.io/badge/Platform-MetaTrader%205%20%7C%20Python%203.10%2B-blue.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Modular%20SMC%2FICT%20IPC-orange.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-All%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-77%2F77%20Passing-brightgreen.svg)]()
 [![Build](https://img.shields.io/badge/MQL5%20Build-0%20Errors%20%7C%200%20Warnings-success.svg)]()
+[![Account Adaptation](https://img.shields.io/badge/Account%20Floor-%245%20Micro%2FCent-blueviolet.svg)]()
 
-Institutional-grade, multi-timeframe algorithmic trading system combining MetaTrader 5 (MQL5) with a high-performance Python algorithmic engine. The bot utilizes Smart Money Concepts (SMC), Inner Circle Trader (ICT) liquidity mechanics, multi-timeframe cascading analysis (W1 -> D1 -> H4 -> H1 -> M15), mathematically normalized position sizing, dynamic trade management, continuous Telegram activity feed with sound dispatch, and strict prop-firm / institutional risk controls.
+Institutional-grade, multi-timeframe algorithmic trading system combining MetaTrader 5 (MQL5) with a high-performance Python quantitative engine. The bot features universal account-size adaptation (supporting any account from a $5 minimum floor upward, including Cent accounts), quantitative validation (Bailey & Lopez de Prado DSR, CSCV PBO, Monte Carlo ruin), dynamic regime detection, meta-labeling, GARCH/EWMA volatility modeling, fractional Kelly risk capping, execution TCA, and real-time CUSUM decay monitoring.
 
 ---
 
@@ -58,30 +59,36 @@ Institutional-grade, multi-timeframe algorithmic trading system combining MetaTr
 ### Directory Structure
 ```
 ├── mql5/
-│   ├── Experts/PythonBridgeEA.mq5   # Native MT5 Expert Advisor bridge
+│   ├── Experts/PythonBridgeEA.mq5   # Native MT5 Expert Advisor bridge (compiled with MetaEditor)
 │   └── Sounds/                     # Native audio cues (signal.wav, trade.wav, alert.wav)
 ├── src/
-│   ├── core/                       # TCP bridge server, data engine, session manager
+│   ├── core/                       # TCP bridge server, data contracts, session clock
+│   ├── data/                       # Multi-timeframe loader, UTC conversion, broker cost model
 │   ├── smc/                        # Liquidity levels, market structure, FVG/OB, MTF analyzer
-│   ├── risk/                       # Mathematical position sizing, trade lifecycle, portfolio caps
-│   ├── execution/                  # 10-point pre-trade checklist, order dispatcher
-│   ├── monitoring/                 # CLI dashboard, audio alert manager (winsound)
+│   ├── regime/                     # Gaussian volatility state classifier, shadow mode
+│   ├── risk/                       # Position sizing ($5 floor), GARCH/EWMA vol, Kelly, drawdown throttle, exposure
+│   ├── execution/                  # Pre-trade checklist, bridge client, order dispatcher
+│   │   └── analytics/              # TCA engine, slippage audit, time-of-day spread filter, idempotency
+│   ├── monitoring/                 # CLI dashboard, CUSUM decay guard, PSI feature drift, deal reconciler
 │   ├── notifications/              # Telegram feed manager, transport, commands, formatting
-│   └── learning/                   # Champion/challenger model evaluator, walk-forward testing
+│   └── learning/                   # Champion/challenger evaluator, walk-forward, DSR, PBO, meta-labeling
 ├── config/
+│   ├── account_tiers.json          # $5-$50,000+ tiers (MICRO, MINI, SMALL, STANDARD, LARGE)
 │   ├── account_profiles.json       # DEMO, LIVE, and PROP firm parameters
 │   ├── risk_config.json            # Max daily loss, max trade risk %, drawdown caps
 │   ├── sessions.json               # London, NY, Asian session definitions & filters
 │   ├── symbols.json                # Per-symbol minimum history and parameters
-│   └── strategy_config.json        # SMC/ICT threshold configurations
+│   └── strategy_config.json        # SMC/ICT and quant feature flags (default OFF in shadow mode)
 ├── scripts/
 │   ├── run_bridge_server.py        # Starts standalone IPC bridge server
 │   ├── start_bot.py                # Launches end-to-end trading pipeline
-│   ├── run_backtest.py             # Historical backtesting runner
-│   ├── validate_readiness.py       # Pre-flight environment validation
-│   ├── verify_all.py               # Comprehensive end-to-end regression suite
-│   └── backup.py                   # Automated snapshot & journal archive script
-├── tests/                          # 17+ automated unit & integration test suites
+│   ├── run_validation.py           # Quantitative validation suite (DSR, PBO, Monte Carlo)
+│   ├── generate_sizing_table.py    # Sizing matrix generator for $5-$50k accounts
+│   ├── promotion_check.py          # Stage 8 production promotion gate evaluation
+│   ├── verify_deep.py              # 12-suite deep architecture and regression test
+│   └── verify_all.py               # Comprehensive end-to-end regression suite
+├── tests/                          # 77 automated unit & integration test suites
+├── reports/                        # Sizing matrices, market profiles, validation reports
 ├── docs/                           # ARCHITECTURE.md, STRATEGY.md, SECURITY.md
 ├── CHANGELOG.md                    # Detailed version history and defect resolutions
 ├── requirements.txt                # Pinned Python package dependencies

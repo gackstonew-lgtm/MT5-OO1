@@ -49,3 +49,18 @@ Every setup is scored across 9 dimensions:
 - Reward-to-Risk ratio >= 1:2.0
 - Acceptable broker spread
 - Risk management approval (no active circuit breaker)
+
+## 4. Quantitative Safety and Filtering Layers (V2.0 Upgrade)
+
+### Account-Size Adaptation ($5 Floor)
+1. **Dynamic Tier Sizing:** Evaluates `min(balance, equity)` against tier boundaries.
+2. **Loss per Lot Calculation:** Loss per lot verified via `OrderCalcProfit` or structural tick value, including spread and commission drag.
+3. **Volume Floor:** Raw lots rounded down to volume step. If below volume min, requires operator acknowledgment (`acknowledged_high_risk_microaccount: true`) and absolute risk ceiling compliance to trade; otherwise safely skipped.
+
+### Quantitative Signal Filters (Shadow Mode)
+1. **Regime Filter:** Classifies environment into Scalp, Hold, or No-Trade. Flags countertrend or choppy periods.
+2. **Meta-Labeling Model:** Estimates win probability using causal feature vectors. Scales risk down for low-confidence setups.
+3. **Volatility Targeting:** Scales size inversely with annualized GARCH/EWMA volatility.
+4. **Fractional Kelly:** Caps sizing based on proven out-of-sample edge. If expectancy is non-positive, size is strictly 0.
+5. **Drawdown Throttle:** Reduces risk by 30% at mild DD, 60% at heavy DD, and pauses completely at 80% buffer utilization.
+6. **Decay Guard:** CUSUM drift detection halts trading if live performance falls 3.0 sigmas below baseline expectation.
