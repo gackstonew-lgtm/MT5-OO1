@@ -55,13 +55,15 @@ enum ENUM_DRAWDOWN_TYPE
 input group "=== Bridge & Connection ==="
 input string              InpServerHost            = "127.0.0.1"; // Python Bridge Server Host
 input int                 InpServerPort            = 5555;        // Python Bridge Server Port
-input int                 InpMagicNumber           = 100101;      // EA Magic Number
+input int                 InpMagicNumber           = 100101;      // EA Base Magic Number
+input int                 InpSymbolMagicOffset     = 0;           // Symbol Magic Offset (0 = Auto per symbol)
 input uint                InpTimeoutMs             = 2000;        // Socket Timeout (ms)
 input uint                InpWatchdogTimeoutSec    = 30;          // Heartbeat Watchdog Timeout (sec)
 
 //--- Input Parameters: Adaptive Strategy Mode
 input group "=== Strategy Modes ==="
 input ENUM_STRATEGY_MODE  InpStrategyMode          = MODE_AUTO;   // Strategy Mode (AUTO/SCALP/HOLD)
+input bool                InpScalpRequireHTFAgreement = true;     // SCALP Requires M15, H1, H4 Agreement
 input int                 InpATRPeriod             = 14;          // ATR Period
 input double              InpADXThreshold          = 22.0;        // ADX Momentum Threshold for Scalp
 input double              InpScalpTP_ATRMult       = 0.8;         // Scalp Take Profit (x ATR M5)
@@ -208,6 +210,38 @@ datetime       g_next_reconnect_time = 0;
 
 // Broker UTC Synchronization
 int            g_broker_utc_offset = 0;
+
+// Symbol Magic, Multi-instance Lock & Account Mode
+int            g_active_magic = 100101;
+bool           g_lock_acquired = false;
+double         g_last_known_balance = 0.0;
+double         g_last_deal_profit = 0.0;
+string         g_margin_mode_str = "HEDGING";
+
+int GetSymbolMagicOffset(const string sym)
+{
+   if(sym == "BTCUSD.m" || sym == "BTCUSD") return 1;
+   if(sym == "EURUSD.m" || sym == "EURUSD") return 2;
+   if(sym == "GBPUSD.m" || sym == "GBPUSD") return 3;
+   if(sym == "USDJPY.m" || sym == "USDJPY") return 4;
+   if(sym == "XAUUSD.m" || sym == "XAUUSD") return 5;
+   if(sym == "GBPJPY.m" || sym == "GBPJPY") return 6;
+   
+   uchar arr[];
+   StringToCharArray(sym, arr);
+   int sum = 0;
+   for(int i = 0; i < ArraySize(arr); i++) sum += (int)arr[i];
+   return (sum % 900) + 10;
+}
+
+string GetCleanSymbol(const string sym)
+{
+   string clean = sym;
+   StringReplace(clean, ".", "_");
+   StringReplace(clean, "#", "_");
+   StringReplace(clean, "/", "_");
+   return clean;
+}
 
 // Dynamic Trading State & Prop Tracking
 bool           g_trading_enabled = false;
@@ -1142,6 +1176,47 @@ void EvaluateClosedBarSetup(const datetime closed_bar_time)
                          hours_pass ? "PASS" : "WEEKEND_CLOSE",
                          risk_pass ? "PASS" : "HALTED",
                          g_daily_loss, dd_pct));
+
+   // Outcome lines: Exactly one outcome line per closed bar evaluation
+   if(!news_pass)
+   {
+      LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
+               StringFormat("TRADE SKIPPED: NEWS_BLACKOUT | Event within %d min [%s]", InpNewsBlockMinutesBefore, news_details));
+      return;
+   }
+   if(!hours_pass)
+   {
+      LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
+               StringFormat("TRADE SKIPPED: SESSION_CLOSED | Weekend close active (Friday hour >= %d)", InpWeekendCloseHourFriday));
+      return;
+   }
+   if(!risk_pass)
+   {
+      double day_ref = (InpDrawdownType == DRAWDOWN_DAILY_START_BALANCE) ? g_day_start_balance : g_day_start_equity;
+      double max_daily_money = day_ref * (InpMaxDailyLossPercent / 100.0);
+      double rem_daily = MathMax(0.0, max_daily_money - ((day_ref > cur_eq) ? (day_ref - cur_eq) : 0.0));
+      LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
+               StringFormat("TRADE SKIPPED: RISK_LIMIT_HALTED | daily loss remaining $%.2f, DD %.2f%%, limit %.2f%%", rem_daily, dd_pct, InpMaxTotalDrawdownPercent));
+      return;
+   }
+   if(!spread_pass)
+   {
+      LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
+               StringFormat("TRADE SKIPPED: SPREAD_EXCEEDED | %s", spread_msg));
+      return;
+   }
+   if(mode == MODE_SCALP && InpScalpRequireHTFAgreement)
+   {
+      if(trend_m15 != trend_h1 || trend_h1 != trend_h4)
+      {
+         LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
+                  StringFormat("NO SETUP: SCALP HTF conflict (M15=%s, H1=%s, H4=%s)", trend_m15, trend_h1, trend_h4));
+         return;
+      }
+   }
+   LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
+            StringFormat("NO SETUP: Closed bar evaluated with no triggering structural signal (Spread=%s, ADX_M5=%.1f)",
+                         FormatSpreadAndPrice(_Symbol, cur_spread_pts), adx_m5_val));
 }
 
 //+------------------------------------------------------------------+
@@ -1304,23 +1379,42 @@ void CheckBarTimingAndEvaluate()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   PrintFormat("[PythonBridgeEA] [INIT] Initializing Bridge v3.10 on %s | Server %s:%d | Magic %d",
-               _Symbol, InpServerHost, InpServerPort, InpMagicNumber);
+   // Determine active magic per symbol
+   g_active_magic = InpMagicNumber + (InpSymbolMagicOffset > 0 ? InpSymbolMagicOffset : GetSymbolMagicOffset(_Symbol));
 
-   // 1. Single Instance Guard (GlobalVariable lock keyed by magic number and terminal login)
-   string lock_key = StringFormat("SMC_LOCK_%d_%d", InpMagicNumber, (int)AccountInfoInteger(ACCOUNT_LOGIN));
+   PrintFormat("[PythonBridgeEA] [INIT] Initializing Bridge v3.10 on %s | Server %s:%d | Magic %d (Base %d)",
+               _Symbol, InpServerHost, InpServerPort, g_active_magic, InpMagicNumber);
+
+   // 1. Single Instance Guard (GlobalVariable lock keyed by symbol, magic number and terminal login)
+   string sym_clean = GetCleanSymbol(_Symbol);
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   string lock_key = StringFormat("SMC_LOCK_%s_%d_%d", sym_clean, g_active_magic, (int)login);
+
    if(GlobalVariableCheck(lock_key))
    {
       datetime last_active = (datetime)GlobalVariableGet(lock_key);
       datetime now_cur = TimeCurrent();
-      if(now_cur > 0 && now_cur >= last_active && (now_cur - last_active < 10))
+      int heartbeat_age = (now_cur > 0 && now_cur >= last_active) ? (int)(now_cur - last_active) : 0;
+      if(now_cur > 0 && heartbeat_age < (int)InpWatchdogTimeoutSec)
       {
-         PrintFormat("[PythonBridgeEA] [FATAL] Duplicate instance detected for Magic %d on account %d! Another chart is actively running this EA. Initialization aborted.",
-                     InpMagicNumber, (int)AccountInfoInteger(ACCOUNT_LOGIN));
+         PrintFormat("[PythonBridgeEA] [FATAL] Duplicate instance detected for symbol %s (Magic %d) on chart %I64d! Active instance on account %d with heartbeat age %d sec (< timeout %d sec). Initialization aborted.",
+                     _Symbol, g_active_magic, ChartID(), (int)login, heartbeat_age, InpWatchdogTimeoutSec);
          return INIT_FAILED;
+      }
+      else
+      {
+         PrintFormat("[PythonBridgeEA] [WARN] Stale lock detected for symbol %s (Magic %d, age %d sec >= timeout %d sec). Claiming lock.",
+                     _Symbol, g_active_magic, heartbeat_age, InpWatchdogTimeoutSec);
       }
    }
    GlobalVariableSet(lock_key, (double)TimeCurrent());
+   g_lock_acquired = true;
+
+   // Margin mode detection
+   ENUM_ACCOUNT_MARGIN_MODE mm = (ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+   g_margin_mode_str = (mm == ACCOUNT_MARGIN_MODE_RETAIL_NETTING) ? "NETTING" :
+                       ((mm == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) ? "HEDGING" : "EXCHANGE");
+   PrintFormat("[PythonBridgeEA] [ACCOUNT_MODE] Terminal Account Margin Mode: %s (code %d)", g_margin_mode_str, (int)mm);
 
    // 2. Broker UTC Offset Detection
    g_broker_utc_offset = (int)(TimeTradeServer() - TimeGMT());
@@ -1329,13 +1423,13 @@ int OnInit()
    ENUM_ACCOUNT_TRADE_MODE trade_mode = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
    string mode_str = (trade_mode == ACCOUNT_TRADE_MODE_DEMO ? "DEMO" :
                      (trade_mode == ACCOUNT_TRADE_MODE_REAL ? "REAL" : "CONTEST"));
-   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   login = AccountInfoInteger(ACCOUNT_LOGIN);
    string server = AccountInfoString(ACCOUNT_SERVER);
    string profile_str = (InpAccountProfile == PROFILE_DEMO ? "DEMO" :
                         (InpAccountProfile == PROFILE_LIVE ? "LIVE" : "PROP"));
 
    // Initialize trading enabled state
-   string enabled_key = StringFormat("SMC_ENABLED_%d_%d", InpMagicNumber, (int)login);
+   string enabled_key = StringFormat("SMC_ENABLED_%s_%d_%d", sym_clean, g_active_magic, (int)login);
    if(GlobalVariableCheck(enabled_key))
       g_trading_enabled = (GlobalVariableGet(enabled_key) > 0.5);
    else
@@ -1345,7 +1439,7 @@ int OnInit()
    }
 
    // Initialize baseline balance and peak equity
-   string init_bal_key = StringFormat("SMC_INITBAL_%d_%d", InpMagicNumber, (int)login);
+   string init_bal_key = StringFormat("SMC_INITBAL_%s_%d_%d", sym_clean, g_active_magic, (int)login);
    if(GlobalVariableCheck(init_bal_key))
       g_initial_balance = GlobalVariableGet(init_bal_key);
    else
@@ -1354,7 +1448,7 @@ int OnInit()
       GlobalVariableSet(init_bal_key, g_initial_balance);
    }
 
-   string peak_eq_key = StringFormat("SMC_PEAKEQ_%d_%d", InpMagicNumber, (int)login);
+   string peak_eq_key = StringFormat("SMC_PEAKEQ_%s_%d_%d", sym_clean, g_active_magic, (int)login);
    if(GlobalVariableCheck(peak_eq_key))
       g_peak_equity = GlobalVariableGet(peak_eq_key);
    else
@@ -1363,7 +1457,7 @@ int OnInit()
       GlobalVariableSet(peak_eq_key, g_peak_equity);
    }
 
-   string days_key = StringFormat("SMC_DAYS_%d_%d", InpMagicNumber, (int)login);
+   string days_key = StringFormat("SMC_DAYS_%s_%d_%d", sym_clean, g_active_magic, (int)login);
    if(GlobalVariableCheck(days_key))
       g_trading_days_count = (int)GlobalVariableGet(days_key);
    else
@@ -1372,7 +1466,8 @@ int OnInit()
       GlobalVariableSet(days_key, 0.0);
    }
 
-   g_trade.SetExpertMagicNumber(InpMagicNumber);
+   g_last_known_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   g_trade.SetExpertMagicNumber(g_active_magic);
    g_trade.SetMarginMode();
    ConfigureFillingMode(_Symbol);
 
@@ -1423,9 +1518,16 @@ void OnDeinit(const int reason)
    EventKillTimer();
    DisconnectSocket();
 
-   // Release single-instance lock
-   string lock_key = StringFormat("SMC_LOCK_%d_%d", InpMagicNumber, (int)AccountInfoInteger(ACCOUNT_LOGIN));
-   GlobalVariableDel(lock_key);
+   // Release single-instance lock ONLY if acquired by this instance
+   if(g_lock_acquired)
+   {
+      string sym_clean = GetCleanSymbol(_Symbol);
+      long login = AccountInfoInteger(ACCOUNT_LOGIN);
+      string lock_key = StringFormat("SMC_LOCK_%s_%d_%d", sym_clean, g_active_magic, (int)login);
+      GlobalVariableDel(lock_key);
+      g_lock_acquired = false;
+      PrintFormat("[PythonBridgeEA] [DEINIT] Single-instance lock released for symbol %s (Magic %d)", _Symbol, g_active_magic);
+   }
 
    if(g_atr_handle_m5 != INVALID_HANDLE) IndicatorRelease(g_atr_handle_m5);
    if(g_atr_handle_h1 != INVALID_HANDLE) IndicatorRelease(g_atr_handle_h1);
@@ -1441,8 +1543,13 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    // Update single-instance heartbeat
-   string lock_key = StringFormat("SMC_LOCK_%d_%d", InpMagicNumber, (int)AccountInfoInteger(ACCOUNT_LOGIN));
-   GlobalVariableSet(lock_key, (double)TimeCurrent());
+   string sym_clean = GetCleanSymbol(_Symbol);
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   if(g_lock_acquired)
+   {
+      string lock_key = StringFormat("SMC_LOCK_%s_%d_%d", sym_clean, g_active_magic, (int)login);
+      GlobalVariableSet(lock_key, (double)TimeCurrent());
+   }
 
    // 1. Midnight / Configurable Reset for Daily Risk & Challenge Tracking
    datetime today = TimeCurrent() / 86400 * 86400;
@@ -1451,7 +1558,7 @@ void OnTimer()
       if(g_trades_today > 0)
       {
          g_trading_days_count++;
-         string days_key = StringFormat("SMC_DAYS_%d_%d", InpMagicNumber, (int)AccountInfoInteger(ACCOUNT_LOGIN));
+         string days_key = StringFormat("SMC_DAYS_%s_%d_%d", sym_clean, g_active_magic, (int)login);
          GlobalVariableSet(days_key, (double)g_trading_days_count);
       }
 
@@ -1875,6 +1982,42 @@ string ProcessCommand(const string json)
                           ok ? "SUCCESS" : "ERROR", req_id, sym, margin);
    }
 
+   // RESET_STATE command
+   if(action == "RESET_STATE")
+   {
+      if(PositionsTotal() > 0)
+      {
+         return StringFormat("{\"status\":\"ERROR\",\"request_id\":\"%s\",\"message\":\"Reset refused: %d position(s) are open. Close positions first.\"}",
+                             req_id, PositionsTotal());
+      }
+      double cur_bal = AccountInfoDouble(ACCOUNT_BALANCE);
+      g_initial_balance = cur_bal;
+      g_peak_equity = cur_bal;
+      g_day_start_balance = cur_bal;
+      g_day_start_equity = cur_bal;
+      g_last_known_balance = cur_bal;
+      g_daily_loss = 0.0;
+      g_trades_today = 0;
+      g_consecutive_losses = 0;
+      g_trading_days_count = 0;
+      g_risk_halted = false;
+      g_buffer_halted = false;
+      g_hard_locked_today = false;
+
+      string sym_clean = GetCleanSymbol(_Symbol);
+      long log = AccountInfoInteger(ACCOUNT_LOGIN);
+      string init_bal_key = StringFormat("SMC_INITBAL_%s_%d_%d", sym_clean, g_active_magic, (int)log);
+      GlobalVariableSet(init_bal_key, cur_bal);
+      string peak_eq_key = StringFormat("SMC_PEAKEQ_%s_%d_%d", sym_clean, g_active_magic, (int)log);
+      GlobalVariableSet(peak_eq_key, cur_bal);
+      string days_key = StringFormat("SMC_DAYS_%s_%d_%d", sym_clean, g_active_magic, (int)log);
+      GlobalVariableSet(days_key, 0.0);
+
+      LogEvent("INFO", _Symbol, "RESET", StringFormat("State reset to current balance $%.2f. Daily counters cleared.", cur_bal));
+      return StringFormat("{\"status\":\"SUCCESS\",\"request_id\":\"%s\",\"message\":\"State reset complete\",\"baseline\":%.2f}",
+                          req_id, cur_bal);
+   }
+
    // 2. ACCOUNT (includes multi-profile metadata, risk & challenge tracking)
    if(action == "ACCOUNT")
    {
@@ -1922,13 +2065,13 @@ string ProcessCommand(const string json)
       double target_prog = (profit_target_money > 0.0) ? MathMax(0.0, (current_profit / profit_target_money) * 100.0) : 0.0;
 
       return StringFormat(
-         "{\"status\":\"SUCCESS\",\"request_id\":\"%s\",\"data\":{\"login\":%d,\"server\":\"%s\",\"trade_mode\":\"%s\",\"profile\":\"%s\",\"trading_enabled\":%s,\"balance\":%.2f,\"equity\":%.2f,\"peak_equity\":%.2f,\"initial_balance\":%.2f,\"daily_loss_pct\":%.2f,\"drawdown_pct\":%.2f,\"remaining_daily_loss\":%.2f,\"remaining_drawdown\":%.2f,\"profit_target_pct\":%.2f,\"trading_days\":%d,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"currency\":\"%s\",\"leverage\":%d,\"trade_allowed\":%s,\"terminal_connected\":%s,\"broker_utc_offset\":%d,\"server_time\":%d,\"utc_time\":%d}}",
+         "{\"status\":\"SUCCESS\",\"request_id\":\"%s\",\"data\":{\"login\":%d,\"server\":\"%s\",\"trade_mode\":\"%s\",\"profile\":\"%s\",\"trading_enabled\":%s,\"balance\":%.2f,\"equity\":%.2f,\"peak_equity\":%.2f,\"initial_balance\":%.2f,\"daily_loss_pct\":%.2f,\"drawdown_pct\":%.2f,\"remaining_daily_loss\":%.2f,\"remaining_drawdown\":%.2f,\"profit_target_pct\":%.2f,\"trading_days\":%d,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"currency\":\"%s\",\"leverage\":%d,\"trade_allowed\":%s,\"terminal_connected\":%s,\"broker_utc_offset\":%d,\"server_time\":%d,\"utc_time\":%d,\"margin_mode\":\"%s\",\"risk_per_trade_percent\":%.2f,\"max_daily_loss_percent\":%.2f,\"max_total_drawdown_percent\":%.2f,\"day_start_balance\":%.2f}}",
          req_id, log, srv, mode_str, profile_str, (g_trading_enabled ? "true" : "false"),
          bal, eq, g_peak_equity, g_initial_balance, daily_loss_pct, dd_pct,
          rem_daily, rem_dd, target_prog, g_trading_days_count,
          mg, fm, ml, cur, lev,
          trade_allowed ? "true" : "false", connected ? "true" : "false",
-         g_broker_utc_offset, (int)TimeTradeServer(), (int)TimeGMT()
+         g_broker_utc_offset, (int)TimeTradeServer(), (int)TimeGMT(), g_margin_mode_str, InpMaxRiskPercentPerTrade, InpMaxDailyLossPercent, InpMaxTotalDrawdownPercent, day_ref
       );
    }
 
@@ -2468,6 +2611,10 @@ string ProcessCommand(const string json)
 
          double exec_sl_money = 0.0, exec_tp_money = 0.0, exec_sl_pts = 0.0, exec_tp_pts = 0.0, exec_rr = 0.0;
          CalculateSLTPMoney(sym, order_type_enum, volume, final_open_price, final_sl, final_tp, exec_sl_money, exec_tp_money, exec_sl_pts, exec_tp_pts, exec_rr);
+         double exec_sl_money_pct = (bal > 0 ? (exec_sl_money / bal) * 100.0 : 0.0);
+         LogEvent("TRADE", sym, "TRADE",
+                  StringFormat("TRADE SENT: %s, %s, %.2f, %.5f, %.5f, %.5f, $%.2f (%.2f%% of balance), ticket #%d",
+                               sym, type_str, volume, final_open_price, final_sl, final_tp, exec_sl_money, exec_sl_money_pct, order_ticket));
          double bal_pct = (bal > 0.0) ? (exec_sl_money / bal) * 100.0 : 0.0;
          double eq_pct  = (eq > 0.0) ? (exec_sl_money / eq) * 100.0 : 0.0;
          string reduced_tag = (GetSymbolState(sym) == SYM_STATE_READY_REDUCED) ? " [REDUCED_HIST]" : "";
@@ -3045,11 +3192,33 @@ void EvaluateRealTimeRisk()
    double cur_equity  = AccountInfoDouble(ACCOUNT_EQUITY);
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
 
+   string sym_clean = GetCleanSymbol(_Symbol);
+   // Detect deposit or withdrawal adjustments
+   if(g_last_known_balance > 0.0 && MathAbs(cur_balance - g_last_known_balance) > 0.001)
+   {
+      double delta = cur_balance - g_last_known_balance;
+      if(MathAbs(delta - g_last_deal_profit) > 0.01)
+      {
+         g_initial_balance += delta;
+         g_day_start_balance += delta;
+         g_day_start_equity += delta;
+         if(delta > 0.0) g_peak_equity += delta;
+         else g_peak_equity = MathMax(cur_balance, g_peak_equity + delta);
+
+         string init_key = StringFormat("SMC_INITBAL_%s_%d_%d", sym_clean, g_active_magic, (int)login);
+         GlobalVariableSet(init_key, g_initial_balance);
+         string peak_key = StringFormat("SMC_PEAKEQ_%s_%d_%d", sym_clean, g_active_magic, (int)login);
+         GlobalVariableSet(peak_key, g_peak_equity);
+         PrintFormat("[PythonBridgeEA] [BALANCE_ADJUST] Balance change of $%.2f detected. New baseline: $%.2f", delta, g_initial_balance);
+      }
+   }
+   g_last_known_balance = cur_balance;
+
    // Update peak equity if new high made
    if(cur_equity > g_peak_equity)
    {
       g_peak_equity = cur_equity;
-      string peak_key = StringFormat("SMC_PEAKEQ_%d_%d", InpMagicNumber, (int)login);
+      string peak_key = StringFormat("SMC_PEAKEQ_%s_%d_%d", sym_clean, g_active_magic, (int)login);
       GlobalVariableSet(peak_key, g_peak_equity);
    }
 

@@ -7,6 +7,13 @@
   "bridge_port": 5555,
   "bridge_sub_port": 5556,
   "magic_number": 100101,
+  "symbol_magic_offsets": {
+    "BTCUSD.m": 1,
+    "EURUSD": 2,
+    "GBPUSD": 3,
+    "USDJPY": 4,
+    "XAUUSD": 5
+  },
   "poll_interval_seconds": 1.0,
   "log_level": "INFO"
 }
