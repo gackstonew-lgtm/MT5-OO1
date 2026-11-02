@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: blocks commits that stage .env, secrets, or raw journals
+
+# 1. Block staging of .env files directly
+if git diff --cached --name-only | grep -E "(^|/)\.env($|\..*)"; then
+    echo "ERROR: Attempted to commit .env file! Secrets must remain strictly local."
+    exit 1
+fi
+
+# 2. Block raw trade journals and model weights
+if git diff --cached --name-only | grep -E "(^|/)(data/|models/|reports/raw/|.*\.onnx)"; then
+    echo "ERROR: Data caches, model weights, or raw reports cannot be committed."
+    exit 1
+fi
+
+# 3. Scan staged diff for potential API tokens or passwords
+STAGED_DIFF=$(git diff --cached)
+if echo "$STAGED_DIFF" | grep -Ei "(bot[0-9]{8,10}:[a-zA-Z0-9_-]{35}|password\s*=\s*['\"][^'\"]+['\"])"; then
+    echo "ERROR: Potential API key or raw password found in staged changes!"
+    exit 1
+fi
+
+exit 0

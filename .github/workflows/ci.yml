@@ -1,0 +1,63 @@
+name: Quantitative CI Suite
+
+on:
+  push:
+    branches: [ feature/*, main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-audit:
+    name: Unit Tests, Secret Scan & Quant Validation
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Secret and Credential Scanner
+        shell: pwsh
+        run: |
+          Write-Host "Running automated secret and credentials audit..."
+          $forbidden = @(
+            "AIzaSy",
+            "bot[0-9]{8,10}:[a-zA-Z0-9_-]{35}",
+            "password\s*=\s*['\"][^'\"]+['\"]"
+          )
+          $violations = 0
+          Get-ChildItem -Recurse -File -Exclude "*.log","*.pyc",".git*" | ForEach-Object {
+            $content = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
+            if ($content) {
+              foreach ($pattern in $forbidden) {
+                if ($content -match $pattern) {
+                  Write-Error "CRITICAL: Secret pattern matched in $($_.FullName): $pattern"
+                  $violations++
+                }
+              }
+            }
+          }
+          if ($violations -gt 0) {
+            Write-Error "CI FAILED: $violations secrets detected in repository!"
+            exit 1
+          }
+          Write-Host "Secret scan passed cleanly. Zero leaked credentials."
+
+      - name: Execute Full Quantitative Unit Test Suite
+        shell: pwsh
+        run: |
+          python -m unittest discover tests -v
+
+      - name: Verify Architecture and Baseline
+        shell: pwsh
+        run: |
+          python scripts/verify_deep.py

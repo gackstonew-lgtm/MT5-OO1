@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# Quant & Data artifacts (Safety Rule 7)
+/data/
+/models/
+reports/raw/
+*.onnx
+
 # Logs and Journals
 *.log
 logs/

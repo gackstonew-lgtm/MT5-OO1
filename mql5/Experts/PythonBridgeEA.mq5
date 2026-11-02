@@ -101,6 +101,10 @@ input double               InpProfitTargetPercent   = 10.0;                // Pr
 input int                  InpMinTradingDays        = 4;                   // Minimum Trading Days (Challenge tracking)
 input int                  InpDailyResetHour        = 0;                   // Daily Reset Server Hour (0-23)
 input int                  InpDailyResetTzOffset    = 0;                   // Daily Reset Timezone Offset (hours)
+input double               InpMinCapitalFloor       = 5.0;                 // Minimum Operating Capital Floor ($)
+input bool                 InpMicroAccountMinLotAllowed = false;          // Allow trading min lot on micro accounts (default false)
+input bool                 InpAcknowledgedHighRiskMicroaccount = false;   // Explicit operator risk acknowledgment (default false)
+input double               InpAbsoluteRiskCeiling   = 5.0;                 // Absolute maximum risk ceiling %
 input double               InpMaxRiskPercent        = 1.0;                 // Default Risk % Per Trade
 input double               InpMaxRiskPercentPerTrade= 2.0;                 // Hard Cap: Max Risk % Per Trade
 input double               InpMinRR                 = 2.0;                 // Hard Cap: Min Reward-to-Risk Ratio
@@ -3360,10 +3364,21 @@ double CalculateLotSize(const string sym, const double risk_pct, const double sl
 {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
-   double capital_base = MathMin(balance, equity);
-   if(capital_base <= 0.0)
+   string cur = AccountInfoString(ACCOUNT_CURRENCY);
+   bool is_cent = (cur == "USC" || cur == "EUC" || cur == "GBX" || cur == "JPC");
+   double raw_bal = balance;
+   double raw_eq  = equity;
+   if(is_cent)
    {
-      sizing_log = "Invalid capital base (<= 0)";
+      balance /= 100.0;
+      equity  /= 100.0;
+   }
+   double capital_base = MathMin(balance, equity);
+   if(capital_base < InpMinCapitalFloor)
+   {
+      sizing_log = StringFormat("Account capital $%.2f is below the $%.2f minimum operating floor. Trading disabled.",
+                                capital_base, InpMinCapitalFloor);
+      PrintFormat("[PythonBridgeEA] [SIZING] %s", sizing_log);
       return 0.0;
    }
 
@@ -3391,6 +3406,15 @@ double CalculateLotSize(const string sym, const double risk_pct, const double sl
 
    double num_ticks = (sl_distance_points * pt) / tick_size;
    double loss_per_lot = num_ticks * tick_value;
+
+   // OrderCalcProfit verification
+   double calc_loss = 0.0;
+   double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+   if(ask > 0 && OrderCalcProfit(ORDER_TYPE_BUY, sym, 1.0, ask, ask - (sl_distance_points * pt), calc_loss))
+   {
+      if(calc_loss < 0.0) loss_per_lot = MathAbs(calc_loss);
+   }
+
    if(loss_per_lot <= 0)
    {
       sizing_log = "Loss per lot calculation non-positive";
@@ -3401,34 +3425,42 @@ double CalculateLotSize(const string sym, const double risk_pct, const double sl
    double step     = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
    double min_lot  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
 
-   // Hard lot cap: accounts under $500 default no larger than min_lot * 3
+   // Dynamic lot cap: accounts under $500 default no larger than min_lot * 3
    double dynamic_max_lot = (capital_base < 500.0) ? MathMin(min_lot * 3.0, InpMaxLot) : InpMaxLot;
    double max_lot  = MathMin(SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX), dynamic_max_lot);
 
    double min_lot_risk = min_lot * loss_per_lot;
    double min_lot_risk_pct = (min_lot_risk / capital_base) * 100.0;
-
-   // If minimum lot already risks more than allowed cap, skip and report!
-   if(min_lot_risk_pct > allowed_cap)
-   {
-      sizing_log = StringFormat("Min lot %.2f risks $%.2f (%.2f%% of capital $%.2f), exceeding max risk cap (%.2f%%%s)",
-                                min_lot, min_lot_risk, min_lot_risk_pct, capital_base, allowed_cap,
-                                GetSymbolState(sym) == SYM_STATE_READY_REDUCED ? " [REDUCED_HIST]" : "");
-      PrintFormat("[PythonBridgeEA] [SIZING] %s", sizing_log);
-      return 0.0;
-   }
+   double min_bal_needed = min_lot_risk / (target_risk_pct / 100.0);
 
    // Strictly round down to volume step (never round up!)
    double steps = MathFloor(raw_lots / step + 1e-8);
    double quantized = steps * step;
 
-   if(quantized < min_lot) quantized = min_lot;
+   if(quantized < min_lot)
+   {
+      if(InpMicroAccountMinLotAllowed && InpAcknowledgedHighRiskMicroaccount && min_lot_risk_pct <= InpAbsoluteRiskCeiling)
+      {
+         quantized = min_lot;
+         PrintFormat("[PythonBridgeEA] [SIZING] Micro-Account Exception Granted: MinLot %.2f risks $%.2f (%.2f%% <= Ceiling %.2f%%)",
+                     min_lot, min_lot_risk, min_lot_risk_pct, InpAbsoluteRiskCeiling);
+      }
+      else
+      {
+         sizing_log = StringFormat("Min lot %.2f risks $%.2f (%.2f%% of capital $%.2f), exceeding target risk %.2f%% (Ceiling: %.2f%%). Raw lot: %.4f. Min bal needed: $%.2f",
+                                   min_lot, min_lot_risk, min_lot_risk_pct, capital_base, target_risk_pct, InpAbsoluteRiskCeiling, raw_lots, min_bal_needed);
+         PrintFormat("[PythonBridgeEA] [SIZING] %s", sizing_log);
+         return 0.0;
+      }
+   }
+
    if(quantized > max_lot) quantized = max_lot;
 
    double final_lots = NormalizeDouble(quantized, 2);
    double actual_risk_pct = ((final_lots * loss_per_lot) / capital_base) * 100.0;
-   sizing_log = StringFormat("Sized %.2f lots: risks $%.2f (%.2f%% of capital $%.2f with SL %.1f pts)",
-                             final_lots, final_lots * loss_per_lot, actual_risk_pct, capital_base, sl_distance_points);
+   string unit_info = is_cent ? StringFormat("Bal: %.0f USC ($%.2f USD)", raw_bal, balance) : StringFormat("Bal: $%.2f %s", balance, cur);
+   sizing_log = StringFormat("Sized %.2f lots: risks $%.2f (%.2f%% of %s with SL %.1f pts)",
+                             final_lots, final_lots * loss_per_lot, actual_risk_pct, unit_info, sl_distance_points);
    PrintFormat("[PythonBridgeEA] [SIZING] %s", sizing_log);
    return final_lots;
 }

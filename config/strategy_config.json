@@ -1,4 +1,18 @@
 {
+  "feature_flags": {
+    "account_size_adaptation": true,
+    "micro_account_min_lot_allowed": false,
+    "shadow_mode": true,
+    "regime_detection": false,
+    "meta_labeling": false,
+    "vol_forecast": false,
+    "vol_targeting": false,
+    "kelly_cap": false,
+    "exposure_limits": false,
+    "tca": false,
+    "decay_guard": false,
+    "llm_review": false
+  },
   "confluence_scoring": {
     "minimum_entry_score": 75.0,
     "weights": {

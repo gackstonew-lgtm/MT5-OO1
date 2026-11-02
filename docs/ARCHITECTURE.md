@@ -17,11 +17,15 @@ flowchart TD
         MTF["Multi-Timeframe Analyzer\n(Cascading Confluence)"]
         SMC["ICT / SMC Strategy Engine\n(FVG, OB, Sweeps, MSS)"]
         Scorer["Confluence Scorer (>= 75/100)"]
-        Risk["Risk & Position Sizing Engine\n(0.5% Equity Budget, SL/TP)"]
-        Execution["Execution & Order Manager\n(10-Point Pre-Trade Checklist)"]
+        Regime["Regime Detector (Stage 2)\n(HMM / Vol State Classifier)"]
+        Meta["Meta-Labeler (Stage 3)\n(Triple Barrier + Probability)"]
+        VolRisk["Volatility & Risk (Stage 4)\n(GARCH, EWMA, Kelly, CVaR)"]
+        Risk["Risk & Account Adaptation (Stage 0A)\n($5 Min Floor, Cent Accounts, Tiers)"]
+        Exposure["Portfolio Exposure (Stage 4)\n(Net Currency Caps, PCA, 1-Pos Micro)"]
+        Execution["Execution & TCA (Stage 5)\n(Pre-Trade Checklist, Idempotency, Limits)"]
         Manager["Trade Lifecycle Manager\n(+1.0R BE, +1.5R Partial, Trailing)"]
-        Learning["Champion/Challenger & Genetic Optimizer"]
-        Monitor["Real-Time Dashboard & Telegram Alerts"]
+        Validation["Validation Suite (Stage 1)\n(DSR, PBO, Purged Walk-Forward, MC)"]
+        Decay["Monitoring & Decay Guard (Stage 6)\n(CUSUM, PSI Drift, Deal Reconciler)"]
     end
 
     BridgeEA <-->|JSON IPC| Orchestrator
@@ -29,24 +33,66 @@ flowchart TD
     MarketData --> WeeklyDaily & MTF
     WeeklyDaily & MTF --> SMC
     SMC --> Scorer
-    Scorer --> Risk
-    Risk --> Execution
+    Scorer --> Regime
+    Regime --> Meta
+    Meta --> VolRisk
+    VolRisk --> Risk
+    Risk --> Exposure
+    Exposure --> Execution
     Execution --> BridgeEA
     BridgeEA --> ChartUI
     Execution --> Manager
     Manager --> Execution
-    Execution --> Learning
-    Orchestrator --> Monitor
+    Execution --> Validation
+    Validation --> Decay
 ```
 
-## 2. Directory Layout & Boundaries
-- `src/core/`: Strongly-typed contracts, config loaders, market data buffers, session clocks, volatility classification, news filter.
-- `src/smc/`: Smart Money Concepts & Inner Circle Trader engines: W1/D1 liquidity levels, market structure (BOS, CHoCH, MSS), FVG/OB detection, MTF bias aggregator, confluence scoring.
-- `src/risk/`: Capital preservation core: mathematically normalized lot sizing, portfolio risk bounds, circuit breakers, lifecycle position management.
-- `src/learning/`: Statistical validation: performance analytics, champion/challenger gating, walk-forward splits, Monte Carlo permutations, genetic parameter optimizer.
-- `src/execution/`: Transport layer: ZeroMQ/Socket bridge client, 10-point pre-trade checklist, order submission, simulation engine.
-- `src/monitoring/`: Observability: CLI/terminal dashboard, Telegram alerts, report generation.
-- `mql5/`: MetaTrader 5 Expert Advisor (`PythonBridgeEA.mq5`) with visual chart indicators.
-- `config/`: JSON configuration templates with zero hardcoded credentials.
-- `scripts/`: Operational tools (`start_bot.py`, `run_backtest.py`, `validate_readiness.py`, `backup.py`).
-- `tests/`: Automated unit and integration test suite.
+## 2. Quantitative Upgrade Subsystems
+
+### Stage 0A: Account-Size Adaptation ($5 Minimum Floor)
+- **Universal Unit Normalization**: Cent account detection (USC, EUC, GBX) with 100:1 dollar conversion.
+- **Account Tiers (`config/account_tiers.json`)**:
+  - `BELOW_FLOOR` (< $5.00): Strict trading halt.
+  - `MICRO` ($5 - $25): 2.0% target risk, 5.0% absolute ceiling.
+  - `MINI` ($25 - $100): 1.5% target risk, 4.0% absolute ceiling.
+  - `SMALL` ($100 - $500): 1.0% target risk, 2.0% absolute ceiling.
+  - `STANDARD` ($500 - $5,000): 1.0% target risk, 1.5% absolute ceiling.
+  - `LARGE` (> $5,000): 0.75% target risk, 1.0% absolute ceiling.
+- **Boundary Hysteresis**: 5% buffer prevents tier-flapping near boundaries.
+- **Affordability Scanner (`src/risk/affordability.py`)**: Classifies symbols into `TRADABLE`, `MARGINAL`, or `BLOCKED` based on ATR stop distance and broker contract specs.
+
+### Stage 1: Modern Quantitative Validation Suite
+- **Purged & Embargoed Walk-Forward Engine (`src/learning/validation/walk_forward.py`)**: Eliminates serial correlation and lookahead bias.
+- **Deflated Sharpe Ratio (DSR)**: Bailey & Lopez de Prado (2014) correction for selection bias across multiple trials.
+- **Probability of Backtest Overfitting (PBO)**: Combinatorial Symmetric Cross-Validation (CSCV).
+- **Monte Carlo Ruin Engine**: 5,000 resamplings estimating breach probabilities for Demo (10%), Live (6%), and Prop (4%) drawdown limits.
+- **Friction Stress Testing**: Stress testing at 1.0x, 1.5x, and 2.0x transaction friction.
+
+### Stage 2: Dynamic Regime Detection
+- **Multi-Feature Regime Classifier (`src/regime/features.py`)**: Realized volatility, ATR percentile, ADX, MTF trend slope, session code, spread ratio.
+- **Gaussian Volatility State Classifier (`src/regime/models.py`)**: Maps market conditions into `SCALP`, `HOLD`, or `NO_TRADE`.
+- **Shadow Mode Audit Trail**: Shadow records what the regime detector would have recommended without modifying orders until promoted.
+
+### Stage 3: Meta-Labeling
+- **Triple-Barrier Labeling (`src/learning/meta/labeling.py`)**: Labels trade opportunities via upper barrier (TP), lower barrier (SL), and vertical time barrier.
+- **Strictly Causal Feature Extractor (`src/learning/meta/features.py`)**: Enforces zero forward lookahead bias through explicit timestamp assertions.
+- **Calibrated Classifier (`src/learning/meta/model.py`)**: Platt-calibrated logistic model providing well-calibrated win probabilities and Brier score tracking.
+- **Sizing Invariants**: Meta-model can only scale down risk (<= 1.0x) or skip; it can never increase risk above base limits.
+
+### Stage 4: Volatility and Risk Modeling
+- **Volatility Forecasting (`src/risk/volatility.py`)**: GARCH(1,1) conditional variance forecasting, RiskMetrics EWMA ($\lambda=0.94$), HAR-RV, and ATR fallback.
+- **Fractional Kelly Criterion (`src/risk/kelly.py`)**: Mathematically derived allocation from out-of-sample expectancy. If expectancy <= 0, Kelly is strictly 0.0.
+- **Drawdown Throttle (`src/risk/drawdown_throttle.py`)**: Multi-tiered stepped reduction (100% -> 70% -> 40% -> 0% pause at 80% buffer utilization) and 99% CVaR tail risk alerts.
+- **Portfolio Exposure Limits (`src/risk/portfolio_exposure.py`)**: Micro/Mini accounts strictly limited to 1 open position. Net currency exposure caps, pairwise correlation gating (> 0.70 rejection), and PCA concentration ratio ($\lambda_1 / \sum \lambda_i$).
+
+### Stage 5: Execution Quality and Analytics (TCA)
+- **Transaction Cost Analysis (`src/execution/analytics/tca.py`)**: Per-order auditing of intended vs filled price, slippage points and USD, latency, and retcodes.
+- **Time-of-Day Spread Model (`src/execution/analytics/spread_filter.py`)**: Identifies illiquid rollover hours (21:00-23:00 UTC) and spreads > 2.0x hourly median.
+- **Limit Orders with Expiry (`src/execution/analytics/limit_orders.py`)**: Passive entries placed at structural pullbacks with expiration.
+- **Idempotency Manager (`src/execution/analytics/idempotency.py`)**: Deterministic SHA-256 request IDs guaranteeing zero duplicate fills.
+
+### Stage 6: Monitoring and Decay Detection
+- **Decay Guard (`src/monitoring/decay_guard.py`)**: CUSUM control chart tracking live rolling expectancy against baseline OOS distribution. 3-tier alerts: Warning (2.0s), Reduced Risk (2.5s), Pause (3.0s, requires operator `/run`).
+- **Feature Drift Detector (`src/monitoring/feature_drift.py`)**: Population Stability Index (PSI) and Kolmogorov-Smirnov test over rolling 100 bars.
+- **Deal Reconciler (`src/monitoring/reconciliation.py`)**: Audits MT5 deal history against bot orders to detect price drift, volume discrepancies, or rogue deals.
+- **LLM Trade Reviewer (`src/monitoring/llm_reviewer.py`)**: Structured weekly review prompt template; remains completely silent when unconfigured.
