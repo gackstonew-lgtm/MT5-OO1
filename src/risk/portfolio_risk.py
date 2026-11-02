@@ -57,17 +57,19 @@ class PortfolioRiskEngine:
         self.last_deal_profit: float = 0.0
         self.last_deal_volume: float = 0.0
         self.trading_days_count: int = 0
+        self.last_known_balance: float = 0.0
 
     @property
     def is_safety_buffer_active(self) -> bool:
         return self.buffer_halted
 
-    def initialize_day(self, equity: float) -> None:
+    def initialize_day(self, equity: float, balance: Optional[float] = None) -> None:
         """Called at start of day/session or first tick to calibrate baseline."""
         today = datetime.now(timezone.utc).date()
         if today != self.current_day or self.daily_starting_equity <= 0:
             self.current_day = today
             self.daily_starting_equity = equity
+            self.daily_starting_balance = balance if balance is not None and balance > 0 else equity
             self.daily_realized_loss = 0.0
             self.session_trades_count = 0
             if self.weekly_starting_equity <= 0 or today.weekday() == 0:  # Monday
@@ -99,6 +101,19 @@ class PortfolioRiskEngine:
             self.daily_starting_equity = eq_val
         if self.daily_starting_balance <= 0:
             self.daily_starting_balance = bal_val
+
+        # Detect deposit or withdrawal adjustments without closed trade PnL
+        if self.last_known_balance > 0 and abs(bal_val - self.last_known_balance) > 0.001:
+            delta = bal_val - self.last_known_balance
+            if abs(delta - self.last_deal_profit) > 0.01:
+                self.initial_balance += delta
+                self.daily_starting_balance += delta
+                self.daily_starting_equity += delta
+                if delta > 0:
+                    self.peak_equity += delta
+                else:
+                    self.peak_equity = max(bal_val, self.peak_equity + delta)
+        self.last_known_balance = bal_val
 
         if eq_val > self.peak_equity:
             self.peak_equity = eq_val
@@ -146,6 +161,69 @@ class PortfolioRiskEngine:
             acc.initial_balance = self.initial_balance
 
         return daily_loss_pct, dd_pct
+
+    def reset_state(self, current_balance: float) -> None:
+        """
+        Sets challenge baseline, day-start balance, and peak equity to current balance,
+        and clears daily counters.
+        """
+        self.initial_balance = current_balance
+        self.peak_equity = current_balance
+        self.daily_starting_balance = current_balance
+        self.daily_starting_equity = current_balance
+        self.last_known_balance = current_balance
+        self.daily_realized_loss = 0.0
+        self.weekly_realized_loss = 0.0
+        self.consecutive_losses = 0
+        self.session_trades_count = 0
+        self.trading_days_count = 0
+        self.last_deal_profit = 0.0
+        self.circuit_breaker_active = False
+        self.circuit_breaker_reason = None
+        self.buffer_halted = False
+        self.hard_locked = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "initial_balance": self.initial_balance,
+            "peak_equity": self.peak_equity,
+            "daily_starting_balance": self.daily_starting_balance,
+            "daily_starting_equity": self.daily_starting_equity,
+            "daily_realized_loss": self.daily_realized_loss,
+            "consecutive_losses": self.consecutive_losses,
+            "session_trades_count": self.session_trades_count,
+            "trading_days_count": self.trading_days_count,
+            "current_day": self.current_day.isoformat(),
+            "last_known_balance": self.last_known_balance
+        }
+
+    def load_from_dict(self, data: Dict[str, Any]) -> None:
+        if not data:
+            return
+        if "initial_balance" in data and float(data["initial_balance"]) > 0:
+            self.initial_balance = float(data["initial_balance"])
+        if "peak_equity" in data and float(data["peak_equity"]) > 0:
+            self.peak_equity = float(data["peak_equity"])
+        if "daily_starting_balance" in data and float(data["daily_starting_balance"]) > 0:
+            self.daily_starting_balance = float(data["daily_starting_balance"])
+        if "daily_starting_equity" in data and float(data["daily_starting_equity"]) > 0:
+            self.daily_starting_equity = float(data["daily_starting_equity"])
+        if "daily_realized_loss" in data:
+            self.daily_realized_loss = float(data["daily_realized_loss"])
+        if "consecutive_losses" in data:
+            self.consecutive_losses = int(data["consecutive_losses"])
+        if "session_trades_count" in data:
+            self.session_trades_count = int(data["session_trades_count"])
+        if "trading_days_count" in data:
+            self.trading_days_count = int(data["trading_days_count"])
+        if "last_known_balance" in data and float(data["last_known_balance"]) > 0:
+            self.last_known_balance = float(data["last_known_balance"])
+        if "current_day" in data:
+            try:
+                from datetime import date
+                self.current_day = date.fromisoformat(data["current_day"])
+            except Exception:
+                pass
 
     def record_closed_trade(self, profit: float, volume: float = 0.01) -> None:
         """Updates realized losses and consecutive win/loss streaks."""
