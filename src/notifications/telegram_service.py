@@ -774,11 +774,15 @@ class TelegramCommandHandler:
         killswitch_handler: Optional[Callable[[], bool]] = None,
         enable_handler: Optional[Callable[[], bool]] = None,
         disable_handler: Optional[Callable[[], bool]] = None,
-        feed_manager: Optional[TelegramFeedManager] = None
+        feed_manager: Optional[TelegramFeedManager] = None,
+        fit_provider: Optional[Callable[[Optional[str]], str]] = None,
+        fit_engine: Optional[Any] = None
     ):
         self.config = config
         self.notifier = notifier
         self.feed_manager = feed_manager
+        self.fit_provider = fit_provider
+        self.fit_engine = fit_engine
         self.transport = TelegramTransport(
             bot_token=config.bot_token or "",
             proxy=config.proxy
@@ -903,6 +907,8 @@ class TelegramCommandHandler:
             self._handle_mute(text)
         elif cmd == "last":
             self._handle_last(text)
+        elif cmd == "fit":
+            self._handle_fit(text)
         elif cmd == "status":
             self._handle_status()
         elif cmd == "positions":
@@ -961,6 +967,7 @@ class TelegramCommandHandler:
         return (
             "🤖 <b>MT5 TRADING BOT COMMANDS</b>\n\n"
             "📊 <b>Queries:</b>\n"
+            "• fit / /fit - Universal Risk Fit evaluation, stop windows, lot sizing & tradability\n"
             "• status / /status - System health, account profile, risk status & challenge tracker\n"
             "• balance / /balance - Live balance, equity, margin, leverage\n"
             "• positions / /positions - List open positions and running PnL\n\n"
@@ -1032,6 +1039,50 @@ class TelegramCommandHandler:
             self._reply(truncate_message(body))
         else:
             self._reply("<i>No activity lines logged yet.</i>")
+
+    def _handle_fit(self, text: str) -> None:
+        parts = text.split()
+        sym_arg = parts[1].strip() if len(parts) > 1 else None
+        if self.fit_provider:
+            msg = self.fit_provider(sym_arg)
+            self._reply(msg)
+            return
+
+        try:
+            from src.risk.fit_engine import RiskFitEngine
+            from src.core.contracts import AccountInfo, SymbolInfo, OrderType
+            engine = self.fit_engine or RiskFitEngine()
+            bal = 10000.0
+            eq = 10000.0
+            cur = 'USD'
+            if self.balance_provider:
+                b_data = self.balance_provider()
+                bal = float(b_data.get('balance', bal))
+                eq = float(b_data.get('equity', eq))
+                cur = b_data.get('currency', cur)
+            elif self.status_provider:
+                st = self.status_provider()
+                bal = float(st.get('balance', bal))
+                eq = float(st.get('equity', eq))
+            acc = AccountInfo(balance=bal, equity=eq, free_margin=eq, currency=cur)
+            symbols_to_check = [sym_arg] if sym_arg else ['XAUUSD.m', 'BTCUSD.m', 'EURUSD.m', 'GBPJPY.m']
+            decisions = []
+            for s in symbols_to_check:
+                sym_info = SymbolInfo(symbol=s)
+                d = engine.evaluate_symbol(
+                    account=acc,
+                    symbol_info=sym_info,
+                    order_type=OrderType.BUY,
+                    entry_price=3900.0 if 'XAU' in s else (80000.0 if 'BTC' in s else (185.0 if 'JPY' in s else 1.0850)),
+                    structural_stop_price=0.0,
+                    timeframe_atrs={'M5': 2.9 if 'XAU' in s else (250.0 if 'BTC' in s else 0.0008)},
+                    preferred_timeframe='M5'
+                )
+                decisions.append(d)
+            msg = engine.format_fit_report(decisions)
+            self._reply(msg)
+        except Exception as e:
+            self._reply(f'⚠️ Error evaluating Risk Fit: {e}')
 
     def _handle_help(self) -> None:
         self._reply(self._get_help_text())
@@ -1188,6 +1239,9 @@ class TelegramCommandHandler:
                 f"{risk_summary}"
                 f"{per_sym_table}"
                 f"{hist_table}"
+            ) + (
+                f"\n\n🎯 <b>RISK FIT ENGINE PER-SYMBOL METRICS:</b>\n{st.get('risk_fit')}\n"
+                if st.get("risk_fit") else ""
             )
         else:
             body = f"ℹ️ <b>SYSTEM STATUS</b>: Bot operational. Multi-profile risk safeguards active (Suppressed Alerts: {suppressed_count})."

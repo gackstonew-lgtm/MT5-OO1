@@ -1,0 +1,43 @@
+{
+  "_comment": "Universal Risk Fit Engine configuration. Editable by the human operator only.",
+  "max_cost_fraction": {
+    "SCALP": 0.08,
+    "HOLD": 0.05,
+    "DEFAULT": 0.05
+  },
+  "noise_multiplier": {
+    "SCALP": 1.5,
+    "HOLD": 1.5,
+    "DEFAULT": 1.5
+  },
+  "broker_buffer_points": 5.0,
+  "candidate_timeframes": [
+    "M5",
+    "M15",
+    "M30",
+    "H1",
+    "H4"
+  ],
+  "min_rr_floor": 1.5,
+  "default_rr": 2.0,
+  "safety_margin_rr": 0.3,
+  "reach_multiplier": 5.0,
+  "spread_to_atr_max_ratio": 0.20,
+  "default_expected_slippage_points": 2.0,
+  "default_commission_per_lot": 6.0,
+  "profile_cache_path": "data/cache/instrument_profiles.json",
+  "hysteresis_pct": 5.0,
+  "fit_score_weights": {
+    "feasibility": 0.35,
+    "cost_efficiency": 0.25,
+    "liquidity": 0.20,
+    "low_correlation": 0.20
+  },
+  "rollover_window_utc": {
+    "start_hour": 21,
+    "start_minute": 55,
+    "end_hour": 22,
+    "end_minute": 15
+  },
+  "news_filter_buffer_minutes": 15
+}
