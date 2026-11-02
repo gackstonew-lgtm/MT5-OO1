@@ -1,0 +1,26 @@
+{
+  "confluence_scoring": {
+    "minimum_entry_score": 75.0,
+    "weights": {
+      "weekly_alignment": 15,
+      "daily_alignment": 15,
+      "h4_trend": 15,
+      "h1_confluence": 10,
+      "m15_mss_close": 15,
+      "liquidity_sweep": 10,
+      "fvg_quality": 10,
+      "order_block_quality": 5,
+      "session_killzone": 5
+    }
+  },
+  "ict_smc": {
+    "allow_countertrend": false,
+    "countertrend_risk_multiplier": 0.5,
+    "swing_lookback_bars": 5,
+    "fvg_min_pip_threshold": 1.5,
+    "displacement_body_to_range_min": 0.60,
+    "ote_fib_lower": 0.62,
+    "ote_fib_upper": 0.79,
+    "equal_high_low_threshold_pips": 2.0
+  }
+}

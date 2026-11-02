@@ -1,0 +1,12 @@
+{
+  "execution_mode": "DEMO",
+  "symbols": ["BTCUSD.m", "EURUSD", "GBPUSD", "USDJPY", "XAUUSD"],
+  "primary_signal_timeframe": "M15",
+  "htf_timeframes": ["W1", "D1", "H4", "H1"],
+  "bridge_host": "127.0.0.1",
+  "bridge_port": 5555,
+  "bridge_sub_port": 5556,
+  "magic_number": 100101,
+  "poll_interval_seconds": 1.0,
+  "log_level": "INFO"
+}

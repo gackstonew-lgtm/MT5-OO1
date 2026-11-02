@@ -1,0 +1,16 @@
+[Unit]
+Description=Institutional Multi-Timeframe MT5 Algorithmic Day-Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=trading
+WorkingDirectory=/opt/trading-bot
+ExecStart=/usr/local/bin/python /opt/trading-bot/scripts/start_bot.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=EXECUTION_MODE=DEMO
+
+[Install]
+WantedBy=multi-user.target

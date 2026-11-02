@@ -1,0 +1,49 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Logs and Journals
+*.log
+logs/
+*.csv
+journals/
+state/
+compile*.log
+live_verification_results.json
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Backups & Temp files
+*.bak*
+*.tmp
+*.swp
+reports/backups/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & Editor Settings
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# MetaTrader Binaries, Templates, and Profiles
+*.ex5
+*.set
+*.tpl
+
+# OS generated
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

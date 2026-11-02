@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mt5_smc_trading_bot
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - EXECUTION_MODE=SIMULATION
+      - BRIDGE_HOST=127.0.0.1
+      - BRIDGE_PORT=5555
+    volumes:
+      - ../config:/app/config
+      - ../reports:/app/reports
