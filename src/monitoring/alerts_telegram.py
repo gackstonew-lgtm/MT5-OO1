@@ -66,3 +66,8 @@ class TelegramAlertManager:
 
     def alert_news_restriction(self, symbol: str, news_title: str) -> None:
         self.notifier.notify_trade_skipped(symbol=symbol, skip_reason=f"High-Impact News: {news_title}")
+
+    def send_decision_outcome(self, outcome: Any) -> bool:
+        if not self.enabled:
+            return False
+        return self.notifier.notify_decision_outcome(outcome)

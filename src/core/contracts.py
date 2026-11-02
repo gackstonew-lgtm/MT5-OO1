@@ -217,8 +217,16 @@ class AccountInfo:
     raw_balance: float = 10000.0
     raw_equity: float = 10000.0
     margin_mode: int = 0
+    margin_mode_str: str = "HEDGING"
 
     def __post_init__(self):
+        if self.margin_mode == 1 or self.margin_mode_str == "NETTING":
+            self.margin_mode = 1
+            self.margin_mode_str = "NETTING"
+        else:
+            self.margin_mode = 2
+            self.margin_mode_str = "HEDGING"
+
         # Auto-detect CENT accounts: USC, EUC, GBX, etc.
         cent_currencies = {"USC", "EUC", "GBX", "JPC"}
         if self.currency.upper() in cent_currencies or self.raw_currency.upper() in cent_currencies:
@@ -407,3 +415,47 @@ class Position:
     initial_sl_distance: float = 0.0
     break_even_activated: bool = False
     partial_taken: bool = False
+class DecisionOutcomeType(str, Enum):
+    TRADE_SENT = "TRADE SENT"
+    TRADE_SKIPPED = "TRADE SKIPPED"
+    NO_SETUP = "NO SETUP"
+
+
+@dataclass
+class DecisionOutcome:
+    symbol: str
+    bar_time: datetime
+    outcome_type: DecisionOutcomeType
+    details: str
+    reason_code: Optional[str] = None
+    real_numbers: Dict[str, Any] = field(default_factory=dict)
+    ticket: Optional[int] = None
+    volume: Optional[float] = None
+    entry_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    risk_dollars: Optional[float] = None
+    risk_percent: Optional[float] = None
+    direction: Optional[str] = None
+    evaluated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def format_line(self) -> str:
+        if self.outcome_type == DecisionOutcomeType.TRADE_SENT:
+            d_str = self.direction.value if hasattr(self.direction, "value") else str(self.direction)
+            t_str = str(self.ticket) if self.ticket is not None else "0"
+            vol = self.volume if self.volume is not None else 0.0
+            ep = self.entry_price if self.entry_price is not None else 0.0
+            sl = self.stop_loss if self.stop_loss is not None else 0.0
+            tp = self.take_profit if self.take_profit is not None else 0.0
+            rd = self.risk_dollars if self.risk_dollars is not None else 0.0
+            rp = self.risk_percent if self.risk_percent is not None else 0.0
+            return (
+                f"TRADE SENT: {self.symbol}, {d_str}, {vol:.2f}, "
+                f"{ep:.5f}, {sl:.5f}, {tp:.5f}, "
+                f"${rd:.2f} ({rp:.2f}% of balance), ticket #{t_str}"
+            )
+        elif self.outcome_type == DecisionOutcomeType.TRADE_SKIPPED:
+            code = self.reason_code or "SKIPPED"
+            return f"TRADE SKIPPED: {code} | {self.details}"
+        else:
+            return f"NO SETUP: {self.details}"
