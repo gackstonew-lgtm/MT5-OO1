@@ -327,6 +327,73 @@ class TelegramNotifier:
         )
         self.send_raw_html(self._format_header_footer(body))
 
+    def notify_decision_outcome(self, outcome: Any) -> bool:
+        """
+        Dispatches closed-bar decision outcome notification to Telegram.
+        Deduplicates by (symbol, bar_time, outcome_type, reason) so that the same message
+        is sent at most once per bar per symbol.
+        """
+        if not self.config.enabled:
+            return False
+
+        now_utc = datetime.now(timezone.utc)
+        today = now_utc.date()
+        if not hasattr(self, "_last_dedup_day"):
+            self._last_dedup_day = today
+            self._outcome_dedup_gate = {}
+            self.suppressed_duplicates_count = 0
+        elif today != self._last_dedup_day:
+            self._last_dedup_day = today
+            self._outcome_dedup_gate.clear()
+            self.suppressed_duplicates_count = 0
+
+        sym = getattr(outcome, "symbol", "")
+        bar_time = getattr(outcome, "bar_time", now_utc)
+        bar_time_str = bar_time.isoformat() if hasattr(bar_time, "isoformat") else str(bar_time)
+        outcome_val = outcome.outcome_type.value if hasattr(outcome.outcome_type, "value") else str(outcome.outcome_type)
+        reason = getattr(outcome, "reason_code", None) or getattr(outcome, "details", "").split("|")[0].strip()
+
+        dedup_key = (sym, bar_time_str, outcome_val, reason)
+        if not hasattr(self, "_outcome_dedup_gate"):
+            self._outcome_dedup_gate = {}
+            self.suppressed_duplicates_count = 0
+
+        if dedup_key in self._outcome_dedup_gate:
+            self.suppressed_duplicates_count += 1
+            return False
+
+        self._outcome_dedup_gate[dedup_key] = time.time()
+
+        if not hasattr(self, "last_symbol_outcomes"):
+            self.last_symbol_outcomes = {}
+        line = outcome.format_line() if hasattr(outcome, "format_line") else str(outcome)
+        self.last_symbol_outcomes[sym] = {
+            "line": line,
+            "time": now_utc.strftime("%H:%M:%S UTC"),
+            "bar_time": bar_time_str,
+            "outcome": outcome_val
+        }
+
+        emoji_tag = {
+            "TRADE SENT": "🚀 <b>DECISION OUTCOME: TRADE SENT</b>",
+            "TRADE SKIPPED": "⏭️ <b>DECISION OUTCOME: TRADE SKIPPED</b>",
+            "NO SETUP": "🔍 <b>DECISION OUTCOME: NO SETUP</b>"
+        }.get(outcome_val, "📋 <b>DECISION OUTCOME</b>")
+
+        body = (
+            f"{emoji_tag}\n\n"
+            f"<b>Symbol:</b> <code>{escape_html(sym)}</code>\n"
+            f"<b>Bar Time:</b> <code>{escape_html(bar_time_str)}</code>\n"
+            f"<pre>{escape_html(line)}</pre>"
+        )
+        self.send_raw_html(self._format_header_footer(body, symbol=sym))
+        return True
+
+    def reset_suppression_counter(self) -> None:
+        self.suppressed_duplicates_count = 0
+        if hasattr(self, "_outcome_dedup_gate"):
+            self._outcome_dedup_gate.clear()
+
     def notify_hard_limit_breach(self, daily_loss_pct: float, total_dd_pct: float, positions_closed: int) -> None:
         """Dispatches Critical Hard Drawdown Breach & Liquidation Notification."""
         body = (
@@ -776,7 +843,8 @@ class TelegramCommandHandler:
         disable_handler: Optional[Callable[[], bool]] = None,
         feed_manager: Optional[TelegramFeedManager] = None,
         fit_provider: Optional[Callable[[Optional[str]], str]] = None,
-        fit_engine: Optional[Any] = None
+        fit_engine: Optional[Any] = None,
+        reset_handler: Optional[Callable[[], Tuple[bool, str]]] = None
     ):
         self.config = config
         self.notifier = notifier
@@ -797,6 +865,7 @@ class TelegramCommandHandler:
         self.enable_handler = enable_handler
         self.disable_handler = disable_handler
         self.set_symbol_choice_handler = None  # Callable[[str, str], bool]
+        self.reset_handler = reset_handler
 
         self._is_running = False
         self._poll_thread: Optional[threading.Thread] = None
@@ -909,6 +978,8 @@ class TelegramCommandHandler:
             self._handle_last(text)
         elif cmd == "fit":
             self._handle_fit(text)
+        elif cmd == "reset":
+            self._handle_reset()
         elif cmd == "status":
             self._handle_status()
         elif cmd == "positions":
@@ -972,6 +1043,7 @@ class TelegramCommandHandler:
             "• balance / /balance - Live balance, equity, margin, leverage\n"
             "• positions / /positions - List open positions and running PnL\n\n"
             "⚙️ <b>Controls:</b>\n"
+            "• reset / /reset - Reset challenge baseline, day-start balance, peak equity & daily counters\n"
             "• enable / /enable - Authorize order execution on active account profile\n"
             "• disable / /disable - Disable order execution (halt new entries)\n"
             "• pause / /pause - Pause market scanning and new order entries\n"
@@ -1107,6 +1179,31 @@ class TelegramCommandHandler:
         else:
             self._reply("⏸️ <b>TRADING DISABLED</b>: Authorization cleared.")
 
+    def _handle_reset(self) -> None:
+        if self.positions_provider:
+            try:
+                positions = self.positions_provider()
+                if positions and len(positions) > 0:
+                    self._reply(f"❌ <b>RESET REFUSED</b>: {len(positions)} active position(s) are open. Close all positions first.")
+                    return
+            except Exception as e:
+                logger.error(f"[Telegram] Error checking positions for reset: {e}")
+
+        self.notifier.reset_suppression_counter()
+        if self.feed_manager:
+            self.feed_manager.suppressed_alerts_count = 0
+
+        if self.reset_handler:
+            try:
+                success, msg = self.reset_handler()
+                self._reply(msg)
+                return
+            except Exception as e:
+                self._reply(f"⚠️ Error executing reset handler: {escape_html(str(e))}")
+                return
+
+        self._reply("✅ <b>RESET COMPLETE</b>: Daily counters and suppressed alert tracking cleared.")
+
     def _handle_status(self) -> None:
         suppressed_count = self.feed_manager.suppressed_alerts_count if self.feed_manager else 0
         if self.status_provider:
@@ -1222,23 +1319,52 @@ class TelegramCommandHandler:
                     f"  - Open Risk: <code>0 pos | $0.00 (0.00% bal / 0.00% eq)</code>\n"
                 )
 
+            # Account mode with margin mode (Netting vs Hedging)
+            margin_mode = st.get("margin_mode", "HEDGING")
+            account_mode_str = f"{mode} [{margin_mode}]" if margin_mode not in mode else mode
+
+            # Baseline and risk caps
+            baseline_bal = float(st.get("initial_balance", 0.0) or st.get("balance", 0.0))
+            per_trade_cap = float(st.get("risk_per_trade_percent", 0.5))
+            daily_loss_cap = float(st.get("max_daily_loss_percent", 4.0))
+            daily_base_amt = float(st.get("day_start_balance", 0.0) or baseline_bal)
+            dd_cap = float(st.get("max_total_drawdown_percent", 8.0))
+            dd_base_amt = float(st.get("peak_equity", 0.0) or baseline_bal)
+
+            # Per-symbol last closed-bar decision outcome with timestamp
+            last_outcomes = dict(getattr(self.notifier, "last_symbol_outcomes", {}))
+            if "last_outcomes" in st and isinstance(st["last_outcomes"], dict):
+                last_outcomes.update(st["last_outcomes"])
+
+            outcomes_section = "\n\n📌 <b>LAST CLOSED-BAR OUTCOMES:</b>\n"
+            if last_outcomes:
+                for s_k, o_data in sorted(last_outcomes.items()):
+                    o_t = o_data.get("time", "N/A")
+                    o_l = o_data.get("line", "N/A")
+                    outcomes_section += f"• <b>{escape_html(s_k)}</b> (<code>{escape_html(o_t)}</code>):\n  <code>{escape_html(o_l)}</code>\n"
+            else:
+                outcomes_section += "<i>No closed-bar evaluations recorded yet.</i>\n"
+
             body = (
                 f"📊 <b>SYSTEM STATUS & CHALLENGE TRACKER</b>\n\n"
                 f"⚙️ <b>State:</b> <code>{escape_html(state)}</code>\n"
                 f"🔌 <b>Bridge:</b> <code>{bridge_conn}</code> (Offset: <code>{utc_offset/3600.0:+.1f} h ({utc_offset:+d} sec)</code>)\n"
-                f"🎮 <b>Account Mode:</b> <code>{escape_html(mode)}</code>\n"
+                f"🎮 <b>Account Mode:</b> <code>{escape_html(account_mode_str)}</code>\n"
                 f"💼 <b>Active Profile:</b> <code>{escape_html(profile)}</code>\n"
                 f"🛡️ <b>Trading Authorized:</b> <code>{trading_enabled}</code>\n"
                 f"📦 <b>Open Positions:</b> <code>{open_count}</code>\n"
                 f"🔢 <b>Trades Today:</b> <code>{trades_today}</code>\n"
                 f"🔕 <b>Suppressed Alert Duplicates:</b> <code>{suppressed_count}</code>\n\n"
-                f"📉 <b>Risk Metrics:</b>\n"
-                f"• Daily Loss: <code>{daily_loss:.2f}%</code> (Remaining: <code>${rem_daily:.2f}</code>)\n"
-                f"• Total DD: <code>{total_dd:.2f}%</code> (Remaining: <code>${rem_dd:.2f}</code>)\n"
+                f"📉 <b>Risk Metrics & Safeguards:</b>\n"
+                f"• Baseline Balance: <code>${baseline_bal:.2f}</code>\n"
+                f"• Per-Trade Risk Cap: <code>{per_trade_cap:.2f}%</code>\n"
+                f"• Daily Loss Cap: <code>{daily_loss_cap:.2f}%</code> (Base: <code>${daily_base_amt:.2f}</code> | Current: <code>{daily_loss:.2f}%</code> | Remaining: <code>${rem_daily:.2f}</code>)\n"
+                f"• Drawdown Cap: <code>{dd_cap:.2f}%</code> (Base: <code>${dd_base_amt:.2f}</code> | Current: <code>{total_dd:.2f}%</code> | Remaining: <code>${rem_dd:.2f}</code>)\n"
                 f"🎯 <b>Challenge Progress:</b> <code>{target_prog:.1f}% Target</code> | <b>Trading Days:</b> <code>{trading_days}</code>"
                 f"{risk_summary}"
                 f"{per_sym_table}"
                 f"{hist_table}"
+                f"{outcomes_section}"
             ) + (
                 f"\n\n🎯 <b>RISK FIT ENGINE PER-SYMBOL METRICS:</b>\n{st.get('risk_fit')}\n"
                 if st.get("risk_fit") else ""
