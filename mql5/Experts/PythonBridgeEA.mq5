@@ -1846,6 +1846,35 @@ string ProcessCommand(const string json)
       return FormatSymbolStatusJson(req_id);
    }
 
+   // 2c. CALC_PROFIT
+   if(action == "CALC_PROFIT")
+   {
+      string sym = ExtractJsonString(json, "symbol", _Symbol);
+      string type_str = ExtractJsonString(json, "type", "BUY");
+      double vol = ExtractJsonDouble(json, "volume", 0.01);
+      double p_open = ExtractJsonDouble(json, "price_open", 0.0);
+      double p_close = ExtractJsonDouble(json, "price_close", 0.0);
+      ENUM_ORDER_TYPE o_type = (type_str == "BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double profit = 0.0;
+      bool ok = OrderCalcProfit(o_type, sym, vol, p_open, p_close, profit);
+      return StringFormat("{\"status\":\"%s\",\"request_id\":\"%s\",\"symbol\":\"%s\",\"profit\":%.4f}",
+                          ok ? "SUCCESS" : "ERROR", req_id, sym, profit);
+   }
+
+   // 2d. CALC_MARGIN
+   if(action == "CALC_MARGIN")
+   {
+      string sym = ExtractJsonString(json, "symbol", _Symbol);
+      string type_str = ExtractJsonString(json, "type", "BUY");
+      double vol = ExtractJsonDouble(json, "volume", 0.01);
+      double price = ExtractJsonDouble(json, "price", 0.0);
+      ENUM_ORDER_TYPE o_type = (type_str == "BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      double margin = 0.0;
+      bool ok = OrderCalcMargin(o_type, sym, vol, price, margin);
+      return StringFormat("{\"status\":\"%s\",\"request_id\":\"%s\",\"symbol\":\"%s\",\"margin\":%.4f}",
+                          ok ? "SUCCESS" : "ERROR", req_id, sym, margin);
+   }
+
    // 2. ACCOUNT (includes multi-profile metadata, risk & challenge tracking)
    if(action == "ACCOUNT")
    {
