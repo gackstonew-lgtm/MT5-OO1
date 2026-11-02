@@ -102,7 +102,8 @@ class PersistentBridgeServer:
                     status_provider=self._get_status_dict,
                     enable_handler=self._enable_trading_action,
                     disable_handler=self._disable_trading_action,
-                    feed_manager=self.feed_manager
+                    feed_manager=self.feed_manager,
+                    reset_handler=self._reset_state_action
                 )
                 self.cmd_handler.set_symbol_choice_handler = self._set_symbol_choice_action
                 logger.info("[BridgeServer] Telegram Activity Feed & Command Handler daemon active.")
@@ -267,7 +268,14 @@ class PersistentBridgeServer:
 
         # If it's a heartbeat PONG or EA-generated heartbeat response, do not route to client requests!
         if data.get("message") == "PONG" or (req_id and str(req_id).startswith("HB_")):
-            logger.debug(f"[HEARTBEAT] PONG from EA: server_time={data.get('server_time')}, utc_time={data.get('utc_time')}")
+            now_t = time.time()
+            if not hasattr(self, "_last_pong_log_time"):
+                self._last_pong_log_time = 0.0
+            if now_t - self._last_pong_log_time >= 60.0:
+                logger.info(f"[HEARTBEAT] PONG from EA: server_time={data.get('server_time')}, utc_time={data.get('utc_time')} (throttled 1/min)")
+                self._last_pong_log_time = now_t
+            else:
+                logger.debug(f"[HEARTBEAT] PONG from EA: server_time={data.get('server_time')}, utc_time={data.get('utc_time')}")
             return
 
         # Fallback: if req_id was omitted in EA response, match oldest pending client request
@@ -288,14 +296,23 @@ class PersistentBridgeServer:
             time.sleep(self.heartbeat_interval_sec)
             if self.is_ea_connected():
                 try:
+                    hb_id = f"HB_{int(time.time()*1000)}"
                     ping_payload = {
                         "action": "PING",
-                        "request_id": f"HB_{int(time.time()*1000)}",
+                        "request_id": hb_id,
                         "timestamp": time.time()
                     }
                     self._send_to_ea_raw(json.dumps(ping_payload) + "\n")
+                    now_t = time.time()
+                    if not hasattr(self, "_last_ping_log_time"):
+                        self._last_ping_log_time = 0.0
+                    if now_t - self._last_ping_log_time >= 60.0:
+                        logger.info(f"[HEARTBEAT] PING sent to EA: req_id={hb_id} (throttled 1/min)")
+                        self._last_ping_log_time = now_t
+                    else:
+                        logger.debug(f"[HEARTBEAT] PING sent to EA: req_id={hb_id}")
                 except Exception as e:
-                    logger.debug(f"Heartbeat send failed: {e}")
+                    logger.error(f"[HEARTBEAT_FAILED] Missed heartbeat / PING send failed immediately: {e}")
 
     def _send_to_ea_raw(self, msg: str) -> bool:
         with self._ea_lock:
@@ -500,6 +517,20 @@ class PersistentBridgeServer:
             return res.get("status") == "SUCCESS"
         except Exception:
             return False
+
+    def _reset_state_action(self) -> tuple[bool, str]:
+        if not self.is_ea_connected():
+            return True, "✅ <b>LOCAL RESET COMPLETE</b>: Daily counters and suppression tracking cleared (EA offline)."
+        try:
+            res = self.forward_request_to_ea({"action": "RESET_STATE"}, timeout_sec=5.0)
+            if res.get("status") == "SUCCESS":
+                baseline = float(res.get("baseline", 0.0))
+                return True, f"✅ <b>STATE RESET COMPLETE</b>: Baseline balance, day-start balance, and peak equity reset to ${baseline:.2f}. Challenge progress: 0.0%. Daily counters cleared."
+            else:
+                err = res.get("message", "Reset refused")
+                return False, f"❌ <b>RESET REFUSED</b>: {err}"
+        except Exception as e:
+            return False, f"⚠️ Error executing reset: {e}"
 
 
 if __name__ == "__main__":

@@ -246,7 +246,13 @@ class BridgeClient:
             action = payload.get("action", "UNKNOWN")
             req_id = payload.get("request_id")
 
-            self.log("REQUEST", f"[{req_id}] Action={action} | Payload: {req_str.strip()}")
+            now_t = time.time()
+            if not hasattr(self, "_last_ping_log_time"):
+                self._last_ping_log_time = 0.0
+            if action != "PING" or (now_t - self._last_ping_log_time >= 60.0):
+                self.log("REQUEST", f"[{req_id}] Action={action} | Payload: {req_str.strip()}")
+                if action == "PING":
+                    self._last_ping_log_time = now_t
 
             send_t0 = time.time()
             try:
@@ -275,7 +281,12 @@ class BridgeClient:
                         self.broker_utc_offset = int(resp_obj["broker_utc_offset"])
                     elif "data" in resp_obj and isinstance(resp_obj["data"], dict) and "broker_utc_offset" in resp_obj["data"]:
                         self.broker_utc_offset = int(resp_obj["data"]["broker_utc_offset"])
-                    self.log("RESPONSE", f"[{req_id}] Latency={latency_ms:.1f}ms | Reply: {json.dumps(resp_obj)}")
+                    if not hasattr(self, "_last_pong_log_time"):
+                        self._last_pong_log_time = 0.0
+                    if action != "PING" or (now_t - self._last_pong_log_time >= 60.0):
+                        self.log("RESPONSE", f"[{req_id}] Latency={latency_ms:.1f}ms | Reply: {json.dumps(resp_obj)}")
+                        if action == "PING":
+                            self._last_pong_log_time = now_t
                     return resp_obj
 
                 self.log("ERROR", f"[{req_id}] Socket timeout on action {action}")
@@ -314,7 +325,9 @@ class BridgeClient:
                 remaining_daily_loss=float(d.get("remaining_daily_loss", 0.0)),
                 remaining_drawdown=float(d.get("remaining_drawdown", 0.0)),
                 profit_target_pct=float(d.get("profit_target_pct", 10.0)),
-                trading_days=int(d.get("trading_days", 0))
+                trading_days=int(d.get("trading_days", 0)),
+                margin_mode_str=str(d.get("margin_mode", "HEDGING")),
+                margin_mode=1 if str(d.get("margin_mode", "")).upper() == "NETTING" else 2
             )
         return None
 
