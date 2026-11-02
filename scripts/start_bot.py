@@ -21,6 +21,10 @@ def main():
     print("=" * 80)
 
     config = AppConfig.load_from_dir()
+    if "--dry-run" in sys.argv:
+        config.dry_run = True
+        print("[MODE] DRY-RUN MODE ENABLED: Exercising sizing and all filters without sending orders.")
+
     print(f"Loaded Configuration | Execution Mode: {config.execution_mode.value}")
     print(f"Monitored Symbols: {', '.join(config.symbols)}")
     print(f"Risk per Trade: {config.risk.risk_percentage}% | Min R:R: 1:{config.risk.min_risk_reward_ratio}")
@@ -35,7 +39,7 @@ def main():
             acc = orchestrator.bridge.get_account()
             if acc:
                 orchestrator.update_account(acc)
-                print(f"Live Account Synchronized | Login: {acc.account_number} | Equity: ${acc.equity:.2f}")
+                print(f"[ACCOUNT_MODE] Synchronized: {acc.trade_mode} [{acc.margin_mode_str}] | Login: {acc.account_number} | Equity: ${acc.equity:.2f}")
         else:
             print("WARNING: MT5 Bridge unreachable. Operating in guarded standby.")
 
