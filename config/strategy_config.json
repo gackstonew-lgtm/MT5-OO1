@@ -32,9 +32,11 @@
     "countertrend_risk_multiplier": 0.5,
     "swing_lookback_bars": 5,
     "fvg_min_pip_threshold": 1.5,
-    "displacement_body_to_range_min": 0.60,
+    "displacement_body_to_range_min": 0.6,
     "ote_fib_lower": 0.62,
     "ote_fib_upper": 0.79,
-    "equal_high_low_threshold_pips": 2.0
-  }
+    "equal_high_low_threshold_pips": 2.0,
+    "scalp_require_htf_agreement": true
+  },
+  "scalp_require_htf_agreement": true
 }

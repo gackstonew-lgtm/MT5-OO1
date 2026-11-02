@@ -32,6 +32,32 @@ class SmcStrategyEngine:
         self.struct_engine = MarketStructureEngine(swing_lookback=5)
         self.fvg_engine = FvgObEngine(min_fvg_pips=1.5, pip_size=pip_size)
 
+    def check_scalp_htf_agreement(
+        self,
+        mtf_ctx: MultiTimeframeContext
+    ) -> Tuple[bool, str, Dict[str, str]]:
+        """
+        Evaluates whether M15, H1, and H4 directions all agree for SCALP mode.
+        Returns: (all_agree: bool, log_message: str, directions: Dict[str, str])
+        """
+        def _bias_to_dir(bias: TrendBias) -> str:
+            if bias in [TrendBias.STRONG_BULLISH, TrendBias.WEAK_BULLISH]:
+                return "BULLISH"
+            elif bias in [TrendBias.STRONG_BEARISH, TrendBias.WEAK_BEARISH]:
+                return "BEARISH"
+            return "RANGING"
+
+        m15_dir = _bias_to_dir(mtf_ctx.m15.trend)
+        h1_dir = _bias_to_dir(mtf_ctx.h1.trend)
+        h4_dir = _bias_to_dir(mtf_ctx.h4.trend)
+
+        directions = {"M15": m15_dir, "H1": h1_dir, "H4": h4_dir}
+
+        if m15_dir != "RANGING" and m15_dir == h1_dir == h4_dir:
+            return True, f"SCALP HTF agreement: All timeframes {m15_dir}", directions
+        else:
+            return False, f"SCALP HTF conflict (M15={m15_dir}, H1={h1_dir}, H4={h4_dir})", directions
+
     def scan_for_opportunities(
         self,
         mtf_ctx: MultiTimeframeContext,

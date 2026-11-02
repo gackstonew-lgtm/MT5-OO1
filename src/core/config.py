@@ -178,6 +178,7 @@ class StrategyConfig:
     ote_fib_entry_min: float = 0.62
     ote_fib_entry_max: float = 0.79
     ote_fib_invalidation: float = 1.00
+    scalp_require_htf_agreement: bool = True  # SCALP requires M15, H1, H4 agreement
 
 
 @dataclass
@@ -190,6 +191,8 @@ class AppConfig:
     bridge_port: int = 5555
     bridge_sub_port: int = 5556
     magic_number: int = 100101
+    symbol_magic_offsets: Dict[str, int] = field(default_factory=lambda: {"BTCUSD.m": 1, "EURUSD": 2, "GBPUSD": 3, "USDJPY": 4, "XAUUSD": 5, "GBPJPY.m": 6})
+    dry_run: bool = False
     log_level: str = "INFO"
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
@@ -202,6 +205,10 @@ class AppConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
+
+    def get_magic_for_symbol(self, symbol: str) -> int:
+        offset = self.symbol_magic_offsets.get(symbol, (abs(hash(symbol)) % 900) + 10)
+        return self.magic_number + offset
 
     @classmethod
     def load_from_dir(cls, config_dir: str = "config") -> AppConfig:
@@ -226,8 +233,24 @@ class AppConfig:
                         cfg.bridge_port = int(data["bridge_port"])
                     if "magic_number" in data:
                         cfg.magic_number = int(data["magic_number"])
+                    if "symbol_magic_offsets" in data:
+                        cfg.symbol_magic_offsets = data["symbol_magic_offsets"]
+                    if "dry_run" in data:
+                        cfg.dry_run = bool(data["dry_run"])
             except Exception as e:
                 print(f"[Config] Error loading settings.json: {e}")
+
+        strat_file = config_path / "strategy_config.json"
+        if strat_file.exists():
+            try:
+                with open(strat_file, "r") as f:
+                    sdata = json.load(f)
+                    if "scalp_require_htf_agreement" in sdata:
+                        cfg.strategy.scalp_require_htf_agreement = bool(sdata["scalp_require_htf_agreement"])
+                    elif "ict_smc" in sdata and "scalp_require_htf_agreement" in sdata["ict_smc"]:
+                        cfg.strategy.scalp_require_htf_agreement = bool(sdata["ict_smc"]["scalp_require_htf_agreement"])
+            except Exception as e:
+                print(f"[Config] Error loading strategy_config.json: {e}")
 
         risk_file = config_path / "risk_config.json"
         if risk_file.exists():
