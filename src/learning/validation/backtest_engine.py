@@ -60,16 +60,20 @@ class BacktestResult:
     total_spread_cost: float
     total_commission_cost: float
     total_slippage_cost: float
+    skipped_trades: int = 0
+    mean_cost_in_r: float = 0.0
 
 
 class RealisticBacktestEngine:
     def __init__(
         self,
         config: Optional[AppConfig] = None,
-        cost_profile: Optional[SymbolCostProfile] = None
+        cost_profile: Optional[SymbolCostProfile] = None,
+        fit_engine: Optional[Any] = None,
     ):
         self.config = config or AppConfig.load_from_dir()
         self.cost_profile = cost_profile
+        self.fit_engine = fit_engine
         self.strategy_engine = SmcStrategyEngine(
             min_score=self.config.strategy.min_confluence_score,
             min_rr=self.config.risk.min_risk_reward_ratio
@@ -87,7 +91,8 @@ class RealisticBacktestEngine:
         candles_d1: Optional[List[Candle]] = None,
         initial_balance: float = 10000.0,
         cost_multiplier: float = 1.0,
-        slippage_pts: float = 2.0
+        slippage_pts: float = 2.0,
+        use_fit_engine: bool = False,
     ) -> BacktestResult:
         """
         Executes candle-by-candle simulation strictly on closed bars.
@@ -102,6 +107,8 @@ class RealisticBacktestEngine:
 
         completed_trades: List[SimulatedTrade] = []
         active_trade: Optional[Dict[str, Any]] = None
+        skipped_count = 0
+        costs_in_r: List[float] = []
 
         total_spread = 0.0
         total_comm = 0.0
@@ -256,7 +263,45 @@ class RealisticBacktestEngine:
 
                 if candidate is not None:
                     c_dir, c_entry, c_sl, c_tp = candidate
-                    # Stage 0A Position Sizing
+                    if use_fit_engine:
+                        if self.fit_engine is None:
+                            from src.risk.fit_engine import RiskFitEngine
+                            self.fit_engine = RiskFitEngine()
+                        fit_dec = self.fit_engine.evaluate_symbol(
+                            account=account,
+                            symbol_info=symbol_info,
+                            order_type=c_dir,
+                            entry_price=c_entry,
+                            structural_stop_price=abs(c_entry - c_sl),
+                            timeframe_atrs={"M15": atr_pts * pt},
+                            target_tp_price=abs(c_tp - c_entry),
+                            preferred_timeframe="M15",
+                            trading_mode="HOLD",
+                            spread_override_pts=spread_pts,
+                            expected_slippage_pts=slippage_pts
+                        )
+                        costs_in_r.append(fit_dec.cost_in_r)
+                        if fit_dec.status in ["TRADABLE", "MARGINAL"] and fit_dec.lot > 0:
+                            c_sl = (c_entry - fit_dec.chosen_stop_price) if c_dir == OrderType.BUY else (c_entry + fit_dec.chosen_stop_price)
+                            c_tp = (c_entry + fit_dec.rr_result.reachable_tp_price) if c_dir == OrderType.BUY else (c_entry - fit_dec.rr_result.reachable_tp_price)
+                            actual_entry = (c_entry + (slippage_pts * pt)) if c_dir == OrderType.BUY else (c_entry - (slippage_pts * pt))
+                            active_trade = {
+                                "direction": c_dir,
+                                "entry_price": actual_entry,
+                                "sl": c_sl,
+                                "tp": c_tp,
+                                "initial_sl": c_sl,
+                                "initial_tp": c_tp,
+                                "volume": fit_dec.lot,
+                                "initial_risk_money": fit_dec.real_risk_money,
+                                "entry_time": current_bar.time,
+                                "entry_bar_idx": i
+                            }
+                        else:
+                            skipped_count += 1
+                        continue
+
+                    # Baseline Stage 0A Position Sizing
                     sizing_res = self.sizing_engine.calculate_lot_size(
                         account=account,
                         symbol_info=symbol_info,
@@ -282,6 +327,8 @@ class RealisticBacktestEngine:
                             "entry_time": current_bar.time,
                             "entry_bar_idx": i
                         }
+                    else:
+                        skipped_count += 1
 
         trades_r = [t.pnl_r for t in completed_trades]
         trades_money = [t.pnl_money for t in completed_trades]
@@ -297,5 +344,7 @@ class RealisticBacktestEngine:
             total_net_profit=sum(trades_money),
             total_spread_cost=total_spread,
             total_commission_cost=total_comm,
-            total_slippage_cost=total_slip
+            total_slippage_cost=total_slip,
+            skipped_trades=skipped_count,
+            mean_cost_in_r=float(np.mean(costs_in_r)) if costs_in_r else 0.0
         )
