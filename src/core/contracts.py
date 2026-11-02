@@ -89,6 +89,21 @@ class AccountProfile(str, Enum):
     PROP = "PROP"
 
 
+class AccountTier(str, Enum):
+    BELOW_FLOOR = "BELOW_FLOOR"
+    MICRO = "MICRO"
+    MINI = "MINI"
+    SMALL = "SMALL"
+    STANDARD = "STANDARD"
+    LARGE = "LARGE"
+
+
+class AffordabilityStatus(str, Enum):
+    TRADABLE = "TRADABLE"
+    MARGINAL = "MARGINAL"
+    BLOCKED = "BLOCKED"
+
+
 class DrawdownType(str, Enum):
     STATIC = "STATIC"
     TRAILING = "TRAILING"
@@ -195,8 +210,26 @@ class AccountInfo:
     remaining_drawdown: float = 1000.0
     profit_target_pct: float = 10.0
     trading_days: int = 0
+    # Tier and Cent Account support
+    tier: str = "STANDARD"
+    is_cent_account: bool = False
+    raw_currency: str = "USD"
+    raw_balance: float = 10000.0
+    raw_equity: float = 10000.0
+    margin_mode: int = 0
 
     def __post_init__(self):
+        # Auto-detect CENT accounts: USC, EUC, GBX, etc.
+        cent_currencies = {"USC", "EUC", "GBX", "JPC"}
+        if self.currency.upper() in cent_currencies or self.raw_currency.upper() in cent_currencies:
+            self.is_cent_account = True
+            if self.raw_balance == self.balance and self.balance > 0:
+                self.balance = self.raw_balance / 100.0
+            if self.raw_equity == self.equity and self.equity > 0:
+                self.equity = self.raw_equity / 100.0
+            if self.free_margin > 0 and self.margin == 0:
+                self.free_margin = self.free_margin / 100.0
+
         if self.profile == "DEMO" and not self.trading_enabled:
             self.trading_enabled = True
         if self.initial_balance <= 0.0:
