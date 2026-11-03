@@ -104,3 +104,12 @@ flowchart TD
 4. **Human Confirm Gate & Paper Shadow Journal (`src/monitoring/shadow_journal.py`, `src/notifications/telegram_service.py`)**: Interactive 120s operator approval in LIVE/PROP modes with `/confirm_mode`, and forward tracking of taken and rejected setups via `/shadow_report`.
 5. **Multi-Symbol Opportunity Scanner (`src/smc/symbol_scanner.py`, `src/smc/news_filter.py`)**: 5-factor scoring model ranking symbols on M15 close with high-impact macroeconomic news calendar blackout window.
 6. **Exit Machine (`src/risk/trade_management.py`)**: Configurable optional exit rules: Time Stop (X bars), End-of-Session Flatten, 1.0R Partial + BE, Structure-Based Swing Trailing.
+
+
+### Stage 8: Pattern Recognition & Confluence Architecture (v3.4 Upgrade)
+1. **Contracts & Pluggable Registry (`src/patterns/contracts.py`)**: Strongly-typed `PatternResult` and `ScoredPattern` dataclasses with centralized registry (`@PatternRegistry.register`) allowing zero-overhead extension across `CANDLE`, `CHART`, and `HARMONIC` pattern families.
+2. **Candlestick Engine (`src/patterns/candlesticks.py`)**: 51 vectorized closed-candle pattern detectors with ATR-normalized body/shadow metrics, prior trend qualification, and Forex gap-equivalent logic.
+3. **Chart & Harmonic Pattern Engine (`src/patterns/chart_patterns.py`)**: Closed-candle swing-based detectors (Head & Shoulders, Double/Triple Tops/Bottoms, Triangles, Wedges, Flags, Rectangles, Channels, Harmonics) with textbook measured-move target projection and structural invalidation levels.
+4. **Context Scorer & Confluence Engine (`src/patterns/context.py`)**: 0-100 rubric synthesizing Order Block/FVG proximity, HTF trend alignment, BOS confirmation state, confirmation candle close, volume expansion, and killzone regime. Incorporates automatic overlap de-duplication and opposing signal conflict resolution.
+5. **Strategy & Execution Hook (`src/patterns/integration.py`, `src/smc/strategy_engine.py`)**: Strangler adapter delivering `PATTERN_CONFLUENCE` setups to the execution pipeline without modifying existing signatures, with master switch off by default.
+6. **Empirical Evaluation Pipeline (`scripts/evaluate_patterns.py`)**: Multi-regime walk-forward splits reporting sample size, win rate, expectancy, profit factor, and max drawdown with transaction costs.

@@ -111,3 +111,34 @@ Every setup is scored across 9 dimensions:
 
 ### Phase 6: Exit Machine
 - Configurable optional exit rules (default OFF): Time-stop, Session-end flatten, 1R Partial with BE, Structure-based swing trailing stop.
+
+
+## 7. Institutional Pattern Recognition & Confluence Layer (V3.4 Upgrade)
+
+### Pluggable Pattern Engine (`src/patterns/`)
+- **51 Candlestick Detectors**:
+  - Full institutional and classic coverage: Dragonfly/Gravestone/Standard/Long-Legged Doji, Hammer, Hanging Man, Inverted Hammer, Shooting Star, Bullish/Bearish Engulfing, Bullish/Bearish Harami, Bullish/Bearish Harami Cross (properly implementing the reference chart's "Bullish Harboring" label), Three Inside Up/Down, Three Outside Up/Down, Three White Soldiers, Three Black Crows, Morning Star, Evening Star, Morning/Evening Doji Star, Piercing Line, Dark Cloud Cover, Abandoned Baby (Bull/Bear), Spinning Top, Marubozu, Pin Bar, Belt Hold, Tweezer Top/Bottom, Inside/Outside Bar, Kicking, Counterattack, On-neck/In-neck/Thrusting, Three Methods (Rising/Falling), Tasuki Gaps, Three Line Strike, Breakaway, Hikkake, Advance Block, Tri-Star, Mat Hold.
+  - ATR-normalized body/shadow ratios and vectorized numpy closed-candle evaluation.
+  - Forex gap-equivalent handling ($\ge 0.30 \times \text{ATR}$) for 24/5 FX markets.
+- **Chart & Harmonic Pattern Detectors**:
+  - Head & Shoulders (and Inverse), Double/Triple Tops & Bottoms, Triangles (Ascending, Descending, Symmetrical), Wedges (Rising, Falling), Flags & Pennants, Rectangles, Channels, Cup & Handle, Rounding Bottom, Broadening Formation, Diamond, Island Reversal.
+  - Harmonics: Gartley, Bat, Butterfly, Crab behind configurable switch (default OFF).
+  - Breakout confirmation strictly requires closed candle beyond neckline/level (wicks never confirm).
+
+### Context Scorer & Confluence Rubric (`src/patterns/context.py`)
+- **0–100 Multi-Factor Confluence Grade**:
+  - Location (30 pts): Order Block, Fair Value Gap, Liquidity sweep (PWH/PWL/PDH/PDL).
+  - HTF Trend Alignment (25 pts): W1->D1->H4->H1 cascade.
+  - Market Structure State (20 pts): Reversals require confirmed BOS; continuations require intact trend.
+  - Confirmation Candle Close (10 pts): Breakout close beyond structural boundaries.
+  - Volume & Momentum Expansion (10 pts): Volume > 1.2x 20-period MA.
+  - Volatility, Session & News (5 pts): London/NY Killzone execution and news blackout safety.
+- **Conflict & Overlap Resolution**:
+  - Opposing patterns on the same bar immediately cancel each other (score = 0, no trade).
+  - Overlapping same-direction patterns de-duplicate, stack up to `max_stacked_patterns` (default 2), and earn a synergy bonus.
+  - Trade execution gated at $\text{score} \ge 65.0$ and $\text{R:R} \ge 2.0$.
+
+### Empirical Evidence & Walk-Forward Evaluation (`scripts/evaluate_patterns.py`)
+- Evaluates out-of-sample expectancy, win rate, profit factor, and maximum drawdown across trending and ranging regimes with spread and commission costs.
+- Generates `reports/pattern_performance.json` with empirical classifications (`ENABLE`, `DISABLE_OR_TUNE`, `INSUFFICIENT_SAMPLE`).
+- Interactive Telegram controls: `/patterns on|off`, `/pattern <name> on|off`, `/patternstats`.

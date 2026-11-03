@@ -1,0 +1,557 @@
+{
+  "timestamp": "2026-11-03T12:37:18.577891+00:00",
+  "total_candles_analyzed": 1000,
+  "spread_pips": 1.2,
+  "patterns": {
+    "Island Reversal": {
+      "sample_size": 329,
+      "win_rate_pct": 37.7,
+      "avg_r": 0.12,
+      "expectancy_r": 0.12,
+      "profit_factor": 1.19,
+      "max_dd_r": 85.68,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bullish Engulfing": {
+      "sample_size": 55,
+      "win_rate_pct": 25.5,
+      "avg_r": -0.26,
+      "expectancy_r": -0.26,
+      "profit_factor": 0.66,
+      "max_dd_r": 33.07,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Three Outside Up": {
+      "sample_size": 52,
+      "win_rate_pct": 32.7,
+      "avg_r": -0.04,
+      "expectancy_r": -0.04,
+      "profit_factor": 0.94,
+      "max_dd_r": 14.39,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Cup and Handle": {
+      "sample_size": 11,
+      "win_rate_pct": 18.2,
+      "avg_r": -0.46,
+      "expectancy_r": -0.46,
+      "profit_factor": 0.44,
+      "max_dd_r": 5.03,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Triple Bottom": {
+      "sample_size": 31,
+      "win_rate_pct": 3.2,
+      "avg_r": -0.9,
+      "expectancy_r": -0.9,
+      "profit_factor": 0.07,
+      "max_dd_r": 27.03,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bearish Engulfing": {
+      "sample_size": 80,
+      "win_rate_pct": 22.5,
+      "avg_r": -0.34,
+      "expectancy_r": -0.34,
+      "profit_factor": 0.56,
+      "max_dd_r": 33.08,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Mat Hold": {
+      "sample_size": 67,
+      "win_rate_pct": 6.0,
+      "avg_r": -0.82,
+      "expectancy_r": -0.82,
+      "profit_factor": 0.12,
+      "max_dd_r": 54.18,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bearish Harami": {
+      "sample_size": 22,
+      "win_rate_pct": 18.2,
+      "avg_r": -0.47,
+      "expectancy_r": -0.47,
+      "profit_factor": 0.43,
+      "max_dd_r": 9.27,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Rounding Bottom": {
+      "sample_size": 75,
+      "win_rate_pct": 6.7,
+      "avg_r": -0.8,
+      "expectancy_r": -0.8,
+      "profit_factor": 0.14,
+      "max_dd_r": 59.21,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bull Flag": {
+      "sample_size": 10,
+      "win_rate_pct": 20.0,
+      "avg_r": -0.37,
+      "expectancy_r": -0.37,
+      "profit_factor": 0.54,
+      "max_dd_r": 7.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Outside Bar": {
+      "sample_size": 43,
+      "win_rate_pct": 30.2,
+      "avg_r": -0.12,
+      "expectancy_r": -0.12,
+      "profit_factor": 0.83,
+      "max_dd_r": 10.18,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bullish Harami": {
+      "sample_size": 10,
+      "win_rate_pct": 40.0,
+      "avg_r": 0.37,
+      "expectancy_r": 0.37,
+      "profit_factor": 1.61,
+      "max_dd_r": 3.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Morning Doji Star": {
+      "sample_size": 3,
+      "win_rate_pct": 66.7,
+      "avg_r": 0.95,
+      "expectancy_r": 0.95,
+      "profit_factor": 3.86,
+      "max_dd_r": 1.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Morning Star": {
+      "sample_size": 12,
+      "win_rate_pct": 50.0,
+      "avg_r": 0.47,
+      "expectancy_r": 0.47,
+      "profit_factor": 1.94,
+      "max_dd_r": 3.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Hikkake": {
+      "sample_size": 35,
+      "win_rate_pct": 28.6,
+      "avg_r": -0.16,
+      "expectancy_r": -0.16,
+      "profit_factor": 0.78,
+      "max_dd_r": 13.26,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Tweezer Top": {
+      "sample_size": 48,
+      "win_rate_pct": 31.2,
+      "avg_r": -0.09,
+      "expectancy_r": -0.09,
+      "profit_factor": 0.87,
+      "max_dd_r": 11.44,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Pin Bar": {
+      "sample_size": 15,
+      "win_rate_pct": 33.3,
+      "avg_r": -0.03,
+      "expectancy_r": -0.03,
+      "profit_factor": 0.95,
+      "max_dd_r": 6.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Evening Star": {
+      "sample_size": 12,
+      "win_rate_pct": 33.3,
+      "avg_r": -0.02,
+      "expectancy_r": -0.02,
+      "profit_factor": 0.97,
+      "max_dd_r": 5.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Three Outside Down": {
+      "sample_size": 45,
+      "win_rate_pct": 24.4,
+      "avg_r": -0.28,
+      "expectancy_r": -0.28,
+      "profit_factor": 0.63,
+      "max_dd_r": 17.14,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Channel": {
+      "sample_size": 2,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 1.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Double Top": {
+      "sample_size": 11,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 10.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Rectangle Range": {
+      "sample_size": 7,
+      "win_rate_pct": 14.3,
+      "avg_r": -0.58,
+      "expectancy_r": -0.58,
+      "profit_factor": 0.33,
+      "max_dd_r": 3.03,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Piercing Line": {
+      "sample_size": 15,
+      "win_rate_pct": 53.3,
+      "avg_r": 0.56,
+      "expectancy_r": 0.56,
+      "profit_factor": 2.2,
+      "max_dd_r": 3.06,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Dragonfly Doji": {
+      "sample_size": 4,
+      "win_rate_pct": 50.0,
+      "avg_r": 0.44,
+      "expectancy_r": 0.44,
+      "profit_factor": 1.88,
+      "max_dd_r": 2.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Belt Hold": {
+      "sample_size": 8,
+      "win_rate_pct": 50.0,
+      "avg_r": 0.46,
+      "expectancy_r": 0.46,
+      "profit_factor": 1.93,
+      "max_dd_r": 2.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Symmetrical Triangle": {
+      "sample_size": 4,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 3.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Triple Top": {
+      "sample_size": 16,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 15.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Descending Triangle": {
+      "sample_size": 17,
+      "win_rate_pct": 17.6,
+      "avg_r": -0.48,
+      "expectancy_r": -0.48,
+      "profit_factor": 0.42,
+      "max_dd_r": 8.08,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Inverse Head and Shoulders": {
+      "sample_size": 9,
+      "win_rate_pct": 77.8,
+      "avg_r": 1.41,
+      "expectancy_r": 1.41,
+      "profit_factor": 7.36,
+      "max_dd_r": 1.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Dark Cloud Cover": {
+      "sample_size": 20,
+      "win_rate_pct": 15.0,
+      "avg_r": -0.56,
+      "expectancy_r": -0.56,
+      "profit_factor": 0.34,
+      "max_dd_r": 11.17,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bearish Harami Cross": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Broadening Formation": {
+      "sample_size": 10,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 9.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Three Inside Down": {
+      "sample_size": 25,
+      "win_rate_pct": 28.0,
+      "avg_r": -0.17,
+      "expectancy_r": -0.17,
+      "profit_factor": 0.76,
+      "max_dd_r": 9.04,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Tweezer Bottom": {
+      "sample_size": 14,
+      "win_rate_pct": 42.9,
+      "avg_r": 0.24,
+      "expectancy_r": 0.24,
+      "profit_factor": 1.41,
+      "max_dd_r": 6.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Three Inside Up": {
+      "sample_size": 22,
+      "win_rate_pct": 18.2,
+      "avg_r": -0.47,
+      "expectancy_r": -0.47,
+      "profit_factor": 0.43,
+      "max_dd_r": 13.19,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Marubozu": {
+      "sample_size": 11,
+      "win_rate_pct": 27.3,
+      "avg_r": -0.2,
+      "expectancy_r": -0.2,
+      "profit_factor": 0.72,
+      "max_dd_r": 5.09,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Counterattack": {
+      "sample_size": 11,
+      "win_rate_pct": 18.2,
+      "avg_r": -0.47,
+      "expectancy_r": -0.47,
+      "profit_factor": 0.42,
+      "max_dd_r": 5.11,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bullish Harami Cross": {
+      "sample_size": 3,
+      "win_rate_pct": 33.3,
+      "avg_r": -0.05,
+      "expectancy_r": -0.05,
+      "profit_factor": 0.92,
+      "max_dd_r": 2.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Ascending Triangle": {
+      "sample_size": 5,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 4.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Breakaway": {
+      "sample_size": 5,
+      "win_rate_pct": 40.0,
+      "avg_r": 0.15,
+      "expectancy_r": 0.15,
+      "profit_factor": 1.25,
+      "max_dd_r": 3.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Three Line Strike": {
+      "sample_size": 4,
+      "win_rate_pct": 25.0,
+      "avg_r": -0.28,
+      "expectancy_r": -0.28,
+      "profit_factor": 0.63,
+      "max_dd_r": 3.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Shooting Star": {
+      "sample_size": 2,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 1.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Hammer": {
+      "sample_size": 3,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 2.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Inverted Hammer": {
+      "sample_size": 3,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 2.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Double Bottom": {
+      "sample_size": 2,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 1.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Bear Flag": {
+      "sample_size": 11,
+      "win_rate_pct": 36.4,
+      "avg_r": 0.08,
+      "expectancy_r": 0.08,
+      "profit_factor": 1.12,
+      "max_dd_r": 2.04,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Bear Pennant": {
+      "sample_size": 3,
+      "win_rate_pct": 66.7,
+      "avg_r": 0.97,
+      "expectancy_r": 0.97,
+      "profit_factor": 3.92,
+      "max_dd_r": 0.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Diamond": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Falling Three Methods": {
+      "sample_size": 3,
+      "win_rate_pct": 100.0,
+      "avg_r": 1.96,
+      "expectancy_r": 1.96,
+      "profit_factor": 5890.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": true,
+      "recommendation": "ENABLE"
+    },
+    "Bull Pennant": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Tri-Star": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Rising Three Methods": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Hanging Man": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    },
+    "Head and Shoulders": {
+      "sample_size": 3,
+      "win_rate_pct": 33.3,
+      "avg_r": -0.01,
+      "expectancy_r": -0.01,
+      "profit_factor": 0.98,
+      "max_dd_r": 1.0,
+      "statistical_edge": false,
+      "recommendation": "DISABLE_OR_TUNE"
+    },
+    "Rising Wedge": {
+      "sample_size": 1,
+      "win_rate_pct": 0.0,
+      "avg_r": -1.0,
+      "expectancy_r": -1.0,
+      "profit_factor": 0.0,
+      "max_dd_r": 0.0,
+      "statistical_edge": false,
+      "recommendation": "INSUFFICIENT_SAMPLE"
+    }
+  }
+}

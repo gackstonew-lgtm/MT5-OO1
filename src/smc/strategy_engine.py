@@ -39,6 +39,7 @@ class SmcStrategyEngine:
         self.allow_choch_only_entries = allow_choch_only_entries
         self.struct_engine = MarketStructureEngine(swing_lookback=swing_lookback)
         self.fvg_engine = FvgObEngine(min_fvg_pips=1.5, pip_size=pip_size)
+        self.pattern_adapter = None
         self.struct_confirmation = StructureStateMachine(
             swing_lookback=swing_lookback,
             require_close_break=require_close_break,
@@ -184,7 +185,61 @@ class SmcStrategyEngine:
             if candidate:
                 candidates.append(candidate)
 
+        # Modular Pattern Confluence Hook
+        pat_cands = self._evaluate_patterns_hook(
+            symbol=symbol,
+            mtf_ctx=mtf_ctx,
+            m15_candles=m15_candles,
+            active_obs=active_bullish_obs + active_bearish_obs,
+            active_fvgs=active_bullish_fvgs + active_bearish_fvgs,
+            struct_state=struct_state,
+            is_in_killzone=is_in_killzone
+        )
+        if pat_cands:
+            candidates.extend(pat_cands)
+
         return candidates
+
+    def _evaluate_patterns_hook(
+        self,
+        symbol: str,
+        mtf_ctx: MultiTimeframeContext,
+        m15_candles: List[Candle],
+        active_obs: List[OrderBlock],
+        active_fvgs: List[FairValueGap],
+        struct_state: Optional[StructureStateSnapshot],
+        is_in_killzone: bool
+    ) -> List[SignalCandidate]:
+        if self.pattern_adapter is None:
+            try:
+                from src.patterns.integration import PatternIntegrationAdapter
+                self.pattern_adapter = PatternIntegrationAdapter()
+            except Exception:
+                return []
+        if not self.pattern_adapter.is_enabled:
+            return []
+
+        htf_bias = 'BULLISH' if mtf_ctx.h4.trend in [TrendBias.STRONG_BULLISH, TrendBias.WEAK_BULLISH] else                    'BEARISH' if mtf_ctx.h4.trend in [TrendBias.STRONG_BEARISH, TrendBias.WEAK_BEARISH] else 'RANGING'
+        liq_levels = {}
+        if mtf_ctx.levels:
+            liq_levels = {
+                'pwh': mtf_ctx.levels.pwh,
+                'pwl': mtf_ctx.levels.pwl,
+                'pdh': mtf_ctx.levels.pdh,
+                'pdl': mtf_ctx.levels.pdl
+            }
+        return self.pattern_adapter.evaluate_symbol_patterns(
+            symbol=symbol,
+            m15_candles=m15_candles,
+            mtf_bias=htf_bias,
+            active_obs=active_obs,
+            active_fvgs=active_fvgs,
+            liquidity_levels=liq_levels,
+            struct_state=struct_state,
+            is_in_killzone=is_in_killzone,
+            news_safe=True,
+            min_rr=self.min_rr
+        )
 
     def _evaluate_bullish_candidate(
         self,

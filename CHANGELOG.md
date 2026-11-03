@@ -2,6 +2,33 @@
 
 All notable changes to the Institutional Multi-Timeframe Algorithmic Trading Bot (`MT5-OO1`) are documented in this file.
 
+## [3.4.0] - 2026-11-03
+
+### Added - Institutional Pattern Recognition & Multi-Factor Confluence Layer
+- **Pluggable Pattern Engine (`src/patterns/`)**:
+  - `PatternResult`, `ScoredPattern`, `PatternRegistry` supporting `CANDLE`, `CHART`, and `HARMONIC` families.
+  - **51 Candlestick Detectors (`src/patterns/candlesticks.py`)**: Vectorized numpy array detectors with ATR-normalized ratios, prior trend slope evaluation, and Forex gap-equivalent handling ($\ge 0.30 \times \text{ATR}$). Includes all 19 reference chart patterns (with "Bullish Harboring" properly implemented as Bullish Harami Cross) plus 32 additional detectors.
+  - **16 Chart Patterns & 4 Harmonics (`src/patterns/chart_patterns.py`)**: Head & Shoulders (and Inverse), Double/Triple Tops & Bottoms, Ascending/Descending/Symmetrical Triangles, Wedges, Flags, Pennants, Rectangles, Channels, Cup & Handle, Rounding Bottom, Broadening, Diamond, Island Reversal, and Gartley, Bat, Butterfly, Crab harmonics. Strictly requires candle-close breakout confirmation (wicks ignored) with measured-move target projection.
+- **Context Scorer & Confluence Rubric (`src/patterns/context.py`)**:
+  - 0–100 composite confluence score evaluated across Order Block/FVG location (30%), HTF trend alignment (25%), BOS structure confirmation (20%), confirmation candle close (10%), volume expansion (10%), and session/news regime (5%).
+  - Automatic opposing signal conflict cancellation (score = 0, no trade) and same-direction overlap de-duplication with stack synergy bonus.
+  - Gated trade execution: requires score $\ge 65.0$ and $\text{R:R} \ge 2.0$.
+- **Strategy Engine Integration (`src/patterns/integration.py`, `src/smc/strategy_engine.py`)**:
+  - Clean modular hook delivering `PATTERN_CONFLUENCE` setups to the execution pipeline. Default `enabled: false` in `config/patterns_config.json` guaranteeing 100% bit-for-bit backward compatibility.
+- **Empirical Evidence & Evaluation Script (`scripts/evaluate_patterns.py`)**:
+  - Multi-regime walk-forward splits reporting sample size, win rate, expectancy, profit factor, and max drawdown with transaction costs.
+  - Exported to `reports/pattern_performance.json` with empirical classifications (`ENABLE`, `DISABLE_OR_TUNE`, `INSUFFICIENT_SAMPLE`).
+- **Telegram Controls (`src/notifications/telegram_service.py`)**:
+  - `/patterns on|off` toggles global pattern layer.
+  - `/pattern <name> on|off` enables/disables specific detectors.
+  - `/patternstats` displays top-performing patterns with statistical edge.
+- **Verification & Test Coverage**:
+  - 164 automated tests passing (`Ran 164 tests in 89s. OK`).
+  - Golden Master 8,640 decisions 100% bit-for-bit identical.
+  - Deep verification 12/12 suites passing (100%).
+  - MetaEditor: 0 errors, 0 warnings.
+  - Secret scan: 0 secrets found.
+
 ## [3.3.0] - 2026-11-03
 
 ### Added - 6-Phase Advanced Quantitative Execution Subsystems

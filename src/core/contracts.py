@@ -118,6 +118,7 @@ class SetupType(str, Enum):
     DAILY_CONTINUATION = "DAILY_CONTINUATION"
     M15_SMC_OTE = "M15_SMC_OTE"
     SESSION_SWEEP = "SESSION_SWEEP"
+    PATTERN_CONFLUENCE = "PATTERN_CONFLUENCE"
 
 
 @dataclass(frozen=True)
@@ -488,6 +489,9 @@ class TradePlan:
     structure_state: str
     timestamp: datetime
     amendments: Tuple[PlanAmendment, ...] = field(default_factory=tuple)
+    pattern_name: Optional[str] = None
+    pattern_family: Optional[str] = None
+    pattern_score: float = 0.0
 
     def with_amendment(self, amendment: PlanAmendment) -> TradePlan:
         """Returns a new immutable TradePlan instance containing the amendment."""
@@ -503,7 +507,10 @@ class TradePlan:
             reward_to_risk=self.reward_to_risk,
             structure_state=self.structure_state,
             timestamp=self.timestamp,
-            amendments=self.amendments + (amendment,)
+            amendments=self.amendments + (amendment,),
+            pattern_name=self.pattern_name,
+            pattern_family=self.pattern_family,
+            pattern_score=self.pattern_score
         )
 
     def format_log(self) -> str:

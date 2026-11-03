@@ -1026,6 +1026,12 @@ class TelegramCommandHandler:
             self._handle_confirm_mode(text)
         elif cmd == "shadow_report":
             self._handle_shadow_report()
+        elif cmd == "patterns":
+            self._handle_patterns(text)
+        elif cmd == "pattern":
+            self._handle_pattern(text)
+        elif cmd == "patternstats":
+            self._handle_patternstats()
         elif cmd == "killswitch":
             self._handle_killswitch_request()
         else:
@@ -1509,6 +1515,113 @@ class TelegramCommandHandler:
             self._reply(self.shadow_journal.format_telegram_report())
         else:
             self._reply("📊 <b>Shadow Report:</b> No active shadow journal registered.")
+
+    def _handle_patterns(self, text: str) -> None:
+        parts = text.split()
+        cfg_path = "config/patterns_config.json"
+        if not os.path.exists(cfg_path):
+            self._reply("❌ Pattern config file not found.")
+            return
+
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception as e:
+            self._reply(f"❌ Error loading patterns config: {e}")
+            return
+
+        if len(parts) > 1:
+            action = parts[1].lower()
+            if action in ("on", "true", "1", "enable"):
+                cfg["enabled"] = True
+                status_str = "ENABLED"
+            elif action in ("off", "false", "0", "disable"):
+                cfg["enabled"] = False
+                status_str = "DISABLED"
+            else:
+                self._reply("Usage: <code>/patterns on|off</code>")
+                return
+
+            try:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+                self._reply(f"🎯 Pattern Recognition Layer is now <b>{status_str}</b>.")
+            except Exception as e:
+                self._reply(f"❌ Failed to save config: {e}")
+        else:
+            cur = "ENABLED" if cfg.get("enabled", False) else "DISABLED"
+            self._reply(f"🎯 Pattern Recognition Layer is currently <b>{cur}</b>.\nUsage: <code>/patterns on|off</code>")
+
+    def _handle_pattern(self, text: str) -> None:
+        parts = text.split()
+        if len(parts) < 3:
+            self._reply("Usage: <code>/pattern &lt;name&gt; on|off</code>\nExample: <code>/pattern Hammer on</code>")
+            return
+
+        pat_target = " ".join(parts[1:-1]).strip().strip('"\'')
+        state_str = parts[-1].lower()
+        new_state = state_str in ("on", "true", "1", "enable")
+
+        cfg_path = "config/patterns_config.json"
+        if not os.path.exists(cfg_path):
+            self._reply("❌ Pattern config file not found.")
+            return
+
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+
+            found = False
+            for section in ["candlestick", "chart", "harmonic"]:
+                sec_dict = cfg.get(section, {}).get("patterns_enabled", {})
+                for k in list(sec_dict.keys()):
+                    if k.lower() == pat_target.lower():
+                        sec_dict[k] = new_state
+                        pat_target = k
+                        found = True
+                        break
+                if found:
+                    break
+
+            if found:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+                st = "ENABLED" if new_state else "DISABLED"
+                self._reply(f"✅ Pattern '<b>{escape_html(pat_target)}</b>' set to <b>{st}</b>.")
+            else:
+                self._reply(f"⚠️ Pattern '<code>{escape_html(pat_target)}</code>' not found in registry.")
+        except Exception as e:
+            self._reply(f"❌ Error updating pattern: {e}")
+
+    def _handle_patternstats(self) -> None:
+        rep_path = "reports/pattern_performance.json"
+        if not os.path.exists(rep_path):
+            self._reply("📊 No pattern performance data available. Run <code>python scripts/evaluate_patterns.py</code> first.")
+            return
+
+        try:
+            with open(rep_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            pats = data.get("patterns", {})
+            if not pats:
+                self._reply("📊 No patterns evaluated in report.")
+                return
+
+            lines = ["📊 <b>TOP PATTERN PERFORMANCE (Empirical Edge)</b>\n"]
+            sorted_pats = sorted(pats.items(), key=lambda x: x[1].get("expectancy_r", 0.0), reverse=True)
+            for name, stats in sorted_pats[:8]:
+                edge_mark = "🌟" if stats.get("statistical_edge") else "▫️"
+                lines.append(
+                    f"{edge_mark} <b>{escape_html(name)}</b>: "
+                    f"Win: <code>{stats.get('win_rate_pct', 0.0)}%</code> | "
+                    f"Exp: <code>{stats.get('expectancy_r', 0.0):.2f}R</code> | "
+                    f"PF: <code>{stats.get('profit_factor', 0.0):.2f}</code>"
+                )
+
+            self._reply("\n".join(lines))
+        except Exception as e:
+            self._reply(f"❌ Error reading pattern stats: {e}")
 
     def request_trade_confirmation(self, plan: Any, timeout_sec: int = 120) -> bool:
         """
