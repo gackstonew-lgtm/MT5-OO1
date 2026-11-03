@@ -134,3 +134,17 @@ flowchart TD
 5. **Interactive Telegram Controls & Walk-Forward Evaluator (`src/notifications/telegram_service.py`, `scripts/evaluate_sessions.py`)**:
    - Telegram commands: `/session`, `/sessionstats`, `/sessionmode`, `/sessionprofile`.
    - Walk-forward multi-regime simulation comparing Baseline vs Scored vs Strict, exporting to `reports/session_performance.json` and feeding `ChampionChallengerEngine`.
+
+### Stage 10: Fast Mode — Low-Latency Scalping Execution Layer (v3.6 Upgrade)
+1. **Low-Latency Execution Path (`src/execution/persistent_socket.py`, `src/execution/async_queue.py`, `mql5/Experts/PythonBridgeEA.mq5`)**:
+   - `NonBlockingExecutionQueue`: Moves Telegram notifications, journaling, and chart drawing off the critical order path (`< 5µs` enqueue overhead).
+   - `PersistentBridgeSocket` (`TCP_NODELAY`) & `LowLatencyOrderDispatcher`: Deterministic idempotent `client_order_id`, auto-detection/fallback across filling modes (`FOK`, `IOC`, `RETURN`), mandatory server-side SL/TP and `stops_level`/`freeze_level` validation, bounded requote retries with live quote/spread re-validation, and stage-by-stage nanosecond latency telemetry.
+2. **Scalp Entry Engine (`src/execution/fast_mode_engine.py`)**:
+   - `PrecomputedSymbolState` cache refreshed on bar close; `M1`/`M5` closed-bar evaluation aligned with `M15`/`H1` bias, confirmed BOS after CHoCH, FVG/OB mitigation, or displacement + rejection pattern, spread $\le 10\%$ of SL filter, ATR floor/ceiling bounds, post-trade cooldown, and hourly rate cap.
+3. **Fast Tick Exit Manager (`src/execution/fast_exit_manager.py`)**:
+   - Tick-driven exit engine enforcing break-even at `+0.5R` above spread+buffer, `50%` partial TP at `+1.0R` + confirmed swing/ATR trailing, time stop, momentum-failure exit, spread-spike SL freeze protection, session-end/rollover/news flatten, and MFE/MAE tracking.
+4. **Speed Risk Guardrails (`src/risk/fast_risk_guard.py`)**:
+   - Strict downward volume rounding (`normalize_volume_down`), `ForceMinLotRiskFloor` + small-account minimum balance calculator & `DECISION` message, projected margin floor ($\ge 300\%$), critical margin flatten floor ($\le 150\%$), combined open-risk cap, anti-stacking/anti-grid/anti-martingale rules, consecutive-loss circuit breaker, and equity-velocity kill switch ($> 2.5\%$ floating loss in `60s`).
+5. **Always-On Watchdog & Remote Controls (`src/execution/watchdog.py`, `src/notifications/telegram_service.py`)**:
+   - Heartbeat monitor, auto-reconnect with full state reconciliation against MT5 positions, stale-tick guard (`5s`), clock drift sanity check, weekend guard, and graceful shutdown cancelling orphaned pending orders.
+   - Telegram commands: `/fastmode on|off`, `/pause`, `/resume`, `/flatten` (strict `chat_id` verification), `/fastquality`, and `/margin`.

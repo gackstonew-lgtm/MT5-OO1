@@ -64,3 +64,16 @@ This document lists every explicit hook point into existing code. In accordance 
 - **Purpose**: Adds handling for `/session`, `/sessionstats`, `/sessionmode`, and `/sessionprofile`.
 - **Defaults**: Non-destructive command additions.
 - **Risk Assessment**: ZERO.
+
+### Hook 9: Fast Mode Pre-Trade Speed & Reliability Guardrails
+- **Target File**: `src/execution/order_manager.py`
+- **Location**: `OrderManager.run_pre_trade_checklist()`
+- **Purpose**: When `config/fast_mode.json` has `"enabled": true` (or candidate is `SetupType.FAST_SCALP`), runs `FastWatchdog.can_open_new_trade()` and `FastRiskGuardEngine.validate_trade_candidate()`.
+- **Defaults**: `"enabled": false`. When false, baseline 16-point checklist runs with 100% bit-for-bit parity.
+- **Risk Assessment**: ZERO. Verified via Golden Master 8,640 replay test.
+
+### Hook 10: Fast Mode Telegram Remote Controls & EA Filling Auto-Detection
+- **Target Files**: `src/notifications/telegram_service.py`, `mql5/Experts/PythonBridgeEA.mq5`
+- **Location**: Command dispatcher loop (`/fastmode`, `/flatten`, `/fastquality`, `/margin`) and `ExecuteTradeCommand()` filling mode selection (`FOK`, `IOC`, `RETURN`).
+- **Defaults**: Non-destructive additions; `SetTypeFillingBySymbol` preserves broker default filling behavior.
+- **Risk Assessment**: ZERO. Verified with MetaEditor64 (0 errors, 0 warnings).

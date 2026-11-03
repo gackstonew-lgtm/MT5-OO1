@@ -875,6 +875,9 @@ class TelegramCommandHandler:
         self.confirm_mode: bool = False
         self.shadow_journal: Optional[Any] = None
         self._pending_trade_confirm: Optional[Dict[str, Any]] = None
+        self.fast_dispatcher: Optional[Any] = None
+        self.fast_risk_guard: Optional[Any] = None
+        self.fast_mode_config_path: str = "config/fast_mode.json"
 
         if self.config.enabled:
             self.start()
@@ -1040,6 +1043,14 @@ class TelegramCommandHandler:
             self._handle_sessionmode(text)
         elif cmd == "sessionprofile":
             self._handle_sessionprofile(text)
+        elif cmd == "fastmode":
+            self._handle_fastmode(text)
+        elif cmd == "flatten":
+            self._handle_flatten(sender_chat)
+        elif cmd == "fastquality":
+            self._handle_fastquality()
+        elif cmd == "margin":
+            self._handle_margin()
         elif cmd == "killswitch":
             self._handle_killswitch_request()
         else:
@@ -1744,6 +1755,135 @@ class TelegramCommandHandler:
                 self._reply("Usage: <code>/sessionprofile ist_reference|market_local_dst</code>")
         except Exception as e:
             self._reply(f"❌ Error setting session profile: {e}")
+
+    def _handle_fastmode(self, text: str) -> None:
+        import json
+        parts = text.split()
+        cfg_path = getattr(self, "fast_mode_config_path", "config/fast_mode.json")
+        if not os.path.exists(cfg_path):
+            self._reply("❌ Fast mode config file not found.")
+            return
+
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception as e:
+            self._reply(f"❌ Error reading fast mode config: {e}")
+            return
+
+        if len(parts) > 1:
+            action = parts[1].lower()
+            if action in ("on", "true", "1", "enable"):
+                cfg["enabled"] = True
+                status_str = "ENABLED"
+            elif action in ("off", "false", "0", "disable"):
+                cfg["enabled"] = False
+                status_str = "DISABLED"
+            else:
+                self._reply("Usage: <code>/fastmode on|off</code>")
+                return
+
+            try:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+                self._reply(
+                    f"⚡ <b>FAST MODE SCALPING LAYER: {status_str}</b>\n"
+                    f"• Entry TF: <code>{cfg.get('entry_timeframe', 'M5')}</code>\n"
+                    f"• Account Mode: <code>{cfg.get('default_account_mode', 'DEMO')}</code>\n"
+                    f"• Risk Guardrails: <code>STRICT (No loosening)</code>"
+                )
+            except Exception as e:
+                self._reply(f"❌ Error saving fast mode config: {e}")
+        else:
+            cur = "ENABLED" if cfg.get("enabled", False) else "DISABLED"
+            self._reply(
+                f"⚡ <b>FAST MODE STATUS:</b> <code>{cur}</code>\n"
+                f"• Entry TF: <code>{cfg.get('entry_timeframe', 'M5')}</code>\n"
+                f"• Allowed Symbols: <code>{', '.join(cfg.get('allowed_symbols', [])[:6])}</code>\n"
+                f"Usage: <code>/fastmode on|off</code>"
+            )
+
+    def _handle_flatten(self, sender_chat: str) -> None:
+        # Double-verify strict chat_id authorization before immediate flatten
+        if str(sender_chat) != str(self.config.chat_id):
+            logger.warning(f"[Telegram] Unauthorized /flatten attempt from chat_id={sender_chat}")
+            return
+        closed = self.closeall_handler() if self.closeall_handler else 0
+        self._reply(
+            f"🚨 <b>EMERGENCY FLATTEN EXECUTED</b>\n"
+            f"• Liquidated Positions: <code>{closed}</code>\n"
+            f"• Authorized Chat ID: <code>{escape_html(str(sender_chat))}</code>"
+        )
+
+    def _handle_fastquality(self) -> None:
+        import json
+        if self.fast_dispatcher and hasattr(self.fast_dispatcher, "get_quality_summary"):
+            stats = self.fast_dispatcher.get_quality_summary()
+            msg = (
+                f"⚡ <b>FAST MODE EXECUTION QUALITY</b>\n\n"
+                f"• <b>Sampled Orders:</b> <code>{stats.get('sample_size', 0)}</code>\n"
+                f"• <b>Avg Total Latency:</b> <code>{stats.get('avg_total_latency_ms', 0.0):.2f} ms</code>\n"
+                f"• <b>Max Total Latency:</b> <code>{stats.get('max_total_latency_ms', 0.0):.2f} ms</code>\n"
+                f"• <b>Avg Order->Fill:</b> <code>{stats.get('avg_order_to_fill_ms', 0.0):.2f} ms</code>\n"
+                f"• <b>Avg Slippage:</b> <code>{stats.get('avg_slippage_points', 0.0):+.2f} pts</code>\n"
+                f"• <b>Avg Spread at Entry:</b> <code>{stats.get('avg_spread_points', 0.0):.1f} pts</code>\n"
+                f"• <b>Total Requotes:</b> <code>{stats.get('total_requotes', 0)}</code>"
+            )
+            self._reply(msg)
+            return
+
+        rep_path = "reports/fast_mode_performance.json"
+        if os.path.exists(rep_path):
+            try:
+                with open(rep_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                lat = data.get("execution_quality", {})
+                msg = (
+                    f"⚡ <b>FAST MODE EXECUTION QUALITY (REPORT)</b>\n\n"
+                    f"• <b>Avg Total Latency:</b> <code>{lat.get('avg_total_latency_ms', 0.0):.2f} ms</code>\n"
+                    f"• <b>Assumed Backtest Latency:</b> <code>{lat.get('assumed_latency_ms', 25.0):.1f} ms</code>\n"
+                    f"• <b>Avg Slippage:</b> <code>{lat.get('avg_slippage_points', 0.0):+.2f} pts</code>\n"
+                    f"• <b>Avg Spread:</b> <code>{lat.get('avg_spread_points', 0.0):.1f} pts</code>\n"
+                    f"• <b>Rejected by Spread:</b> <code>{data.get('rejected_by_spread', 0)}</code>\n"
+                    f"• <b>Rejected by Margin:</b> <code>{data.get('rejected_by_margin', 0)}</code>"
+                )
+                self._reply(msg)
+                return
+            except Exception:
+                pass
+
+        self._reply("⚡ <b>FAST QUALITY:</b> No fast execution samples recorded yet.")
+
+    def _handle_margin(self) -> None:
+        from src.risk.fast_risk_guard import FastRiskGuardEngine
+        from src.core.contracts import AccountInfo
+        guard = self.fast_risk_guard or FastRiskGuardEngine()
+
+        bal, eq, used_margin, free_margin, margin_lvl = 10000.0, 10000.0, 0.0, 10000.0, 0.0
+        if self.balance_provider:
+            b = self.balance_provider()
+            bal = float(b.get("balance", bal))
+            eq = float(b.get("equity", eq))
+            used_margin = float(b.get("margin", used_margin))
+            free_margin = float(b.get("free_margin", free_margin))
+            margin_lvl = float(b.get("margin_level", margin_lvl))
+
+        positions = self.positions_provider() if self.positions_provider else []
+        acc = AccountInfo(balance=bal, equity=eq, margin=used_margin, free_margin=free_margin, margin_level=margin_lvl)
+        status = guard.check_margin_and_open_risk(account=acc, active_positions=positions)
+
+        lvl_str = "∞ (No Margin Used)" if used_margin <= 0 else f"{status.current_margin_level_pct:.1f}%"
+        msg = (
+            f"🛡️ <b>MARGIN & OPEN-RISK HEALTH</b>\n\n"
+            f"• <b>Equity:</b> <code>${eq:.2f}</code> | <b>Used Margin:</b> <code>${used_margin:.2f}</code>\n"
+            f"• <b>Current Margin Level:</b> <code>{lvl_str}</code>\n"
+            f"• <b>Required Entry Floor:</b> <code>300.0%</code>\n"
+            f"• <b>Critical Flatten Floor:</b> <code>150.0%</code>\n"
+            f"• <b>Combined Open Risk:</b> <code>${status.combined_open_risk_usd:.2f} ({status.combined_open_risk_pct_equity:.2f}% eq)</code>\n"
+            f"• <b>Can Open New Trade:</b> <code>{'YES' if status.can_open_new_trade else 'NO'}</code>"
+            + (f"\n• <b>Note:</b> <i>{escape_html(status.reason)}</i>" if status.reason else "")
+        )
+        self._reply(msg)
 
     def request_trade_confirmation(self, plan: Any, timeout_sec: int = 120) -> bool:
         """

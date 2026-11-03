@@ -142,6 +142,7 @@ class SetupType(str, Enum):
     M15_SMC_OTE = "M15_SMC_OTE"
     SESSION_SWEEP = "SESSION_SWEEP"
     PATTERN_CONFLUENCE = "PATTERN_CONFLUENCE"
+    FAST_SCALP = "FAST_SCALP"
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,10 @@ class SymbolInfo:
     spread: float = 1.2
     ask: float = 0.0
     bid: float = 0.0
+    stops_level: int = 0
+    freeze_level: int = 0
+    filling_mode: str = "FOK"
+    last_tick_time: Optional[datetime] = None
 
     def round_price(self, price: float) -> float:
         return round(price, self.digits)
@@ -212,6 +217,15 @@ class SymbolInfo:
         if rounded < self.min_lot:
             return 0.0
         return min(round(rounded, 2), self.max_lot)
+
+    def normalize_volume_down(self, volume: float) -> float:
+        """Strictly rounds DOWN to the nearest lot_step without inflating risk."""
+        import math
+        step = self.lot_step if self.lot_step > 0 else 0.01
+        floored = math.floor((volume + 1e-9) / step) * step
+        if floored < self.min_lot - 1e-9:
+            return 0.0
+        return min(round(floored, 2), self.max_lot)
 
 
 @dataclass
@@ -566,3 +580,72 @@ class TradePlan:
             f"• <b>Structure:</b> <code>{self.structure_state}</code>\n"
             f"• <b>Locked at:</b> <code>{self.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}</code>"
         )
+
+
+class ExecutionFillingMode(str, Enum):
+    FOK = "FOK"
+    IOC = "IOC"
+    RETURN = "RETURN"
+
+
+@dataclass
+class ExecutionLatencyRecord:
+    client_order_id: str
+    symbol: str
+    direction: str
+    bar_received_ns: int = 0
+    analysis_done_ns: int = 0
+    checklist_passed_ns: int = 0
+    order_sent_ns: int = 0
+    fill_confirmed_ns: int = 0
+    requote_count: int = 0
+    requested_price: float = 0.0
+    fill_price: float = 0.0
+    slippage_points: float = 0.0
+    spread_at_entry_points: float = 0.0
+    filling_mode: str = "FOK"
+    status: str = "PENDING"
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def analysis_ms(self) -> float:
+        if self.bar_received_ns > 0 and self.analysis_done_ns >= self.bar_received_ns:
+            return round((self.analysis_done_ns - self.bar_received_ns) / 1_000_000.0, 3)
+        return 0.0
+
+    @property
+    def checklist_ms(self) -> float:
+        if self.analysis_done_ns > 0 and self.checklist_passed_ns >= self.analysis_done_ns:
+            return round((self.checklist_passed_ns - self.analysis_done_ns) / 1_000_000.0, 3)
+        return 0.0
+
+    @property
+    def dispatch_ms(self) -> float:
+        if self.order_sent_ns > 0 and self.fill_confirmed_ns >= self.order_sent_ns:
+            return round((self.fill_confirmed_ns - self.order_sent_ns) / 1_000_000.0, 3)
+        return 0.0
+
+    @property
+    def total_ms(self) -> float:
+        if self.bar_received_ns > 0 and self.fill_confirmed_ns >= self.bar_received_ns:
+            return round((self.fill_confirmed_ns - self.bar_received_ns) / 1_000_000.0, 3)
+        return 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "client_order_id": self.client_order_id,
+            "symbol": self.symbol,
+            "direction": self.direction,
+            "analysis_ms": self.analysis_ms,
+            "checklist_ms": self.checklist_ms,
+            "dispatch_ms": self.dispatch_ms,
+            "total_ms": self.total_ms,
+            "requote_count": self.requote_count,
+            "requested_price": self.requested_price,
+            "fill_price": self.fill_price,
+            "slippage_points": self.slippage_points,
+            "spread_at_entry_points": self.spread_at_entry_points,
+            "filling_mode": self.filling_mode,
+            "status": self.status,
+            "timestamp": self.timestamp.isoformat()
+        }

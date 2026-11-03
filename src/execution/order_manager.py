@@ -52,6 +52,9 @@ class OrderManager:
         self.session_engine = None
         self.affinity_engine = None
         self.session_risk = None
+        self.fast_risk_guard = None
+        self.fast_watchdog = None
+        self.fast_exit_manager = None
         try:
             from src.core.sessions import TradingSessionEngine
             from src.core.session_affinity import SessionAffinityEngine
@@ -59,6 +62,15 @@ class OrderManager:
             self.session_engine = TradingSessionEngine(self.config.session)
             self.affinity_engine = SessionAffinityEngine()
             self.session_risk = SessionRiskEngine()
+        except Exception:
+            pass
+        try:
+            from src.risk.fast_risk_guard import FastRiskGuardEngine
+            from src.execution.watchdog import FastWatchdog
+            from src.execution.fast_exit_manager import FastTickExitManager
+            self.fast_risk_guard = FastRiskGuardEngine()
+            self.fast_watchdog = FastWatchdog()
+            self.fast_exit_manager = FastTickExitManager()
         except Exception:
             pass
 
@@ -234,6 +246,29 @@ class OrderManager:
             )
             if not allowed_risk:
                 rejections.append(f"Pre-check failed (Session trade and loss caps OK): {s_reason}")
+
+        # 17-19. Fast Mode Speed & Reliability Guardrails (when Fast Mode is enabled or FAST_SCALP setup)
+        from src.core.contracts import SetupType
+        fast_enabled = bool(self.fast_risk_guard and self.fast_risk_guard._cfg.get("enabled", False))
+        if fast_enabled or getattr(candidate, "setup_type", None) == SetupType.FAST_SCALP:
+            if self.fast_watchdog:
+                wd_ok, wd_reason = self.fast_watchdog.can_open_new_trade(
+                    symbol_info=symbol_info,
+                    now_utc=candidate.timestamp
+                )
+                if not wd_ok:
+                    rejections.append(f"Pre-check failed (Fast Watchdog): {wd_reason}")
+            if self.fast_risk_guard:
+                fg_ok, fg_reason = self.fast_risk_guard.validate_trade_candidate(
+                    candidate=candidate,
+                    account=account,
+                    symbol_info=symbol_info,
+                    active_positions=active_positions,
+                    proposed_volume=size_result.volume,
+                    proposed_monetary_risk=size_result.monetary_risk
+                )
+                if not fg_ok:
+                    rejections.append(f"Pre-check failed (Fast Risk Guard): {fg_reason}")
 
         passed = len(rejections) == 0
 

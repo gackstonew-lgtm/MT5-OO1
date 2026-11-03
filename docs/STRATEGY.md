@@ -197,3 +197,39 @@ Every setup is scored across 9 dimensions:
   - **Scored Mode**: 1,571.89R Max Drawdown ($N=2,189$, 9.5% win rate) — **35.1% reduction in drawdown**.
   - **Strict Mode**: 1,012.14R Max Drawdown ($N=1,421$, 10.1% win rate) — **58.2% reduction in drawdown**.
 - Telegram commands: `/session`, `/sessionstats`, `/sessionmode strict|scored`, `/sessionprofile ist_reference|market_local_dst`.
+
+## 11. Fast Mode — Low-Latency Scalping Execution Layer (`config/fast_mode.json`)
+
+**Default State**: `"enabled": false` (OFF by default; `DEMO` is the default account mode). Fast Mode strictly **tightens** risk guardrails and never relaxes any baseline limit.
+
+### 11.1 Low-Latency Execution Path (`src/execution/persistent_socket.py`, `src/execution/async_queue.py`)
+- **Stage-by-Stage Nanosecond Instrumentation**: Measures `bar_received_ns -> analysis_done_ns -> checklist_passed_ns -> order_sent_ns -> fill_confirmed_ns`, requote count, slippage (requested vs fill in points), and spread at entry per trade.
+- **Non-Blocking Hot Path**: Telegram notifications, journaling, and chart drawing are queued asynchronously via `NonBlockingExecutionQueue` (`< 5µs` enqueue latency) so they never block order dispatch.
+- **Persistent Socket & Pre-Computed State**: `PersistentBridgeSocket` (`TCP_NODELAY`) and `PrecomputedSymbolState` refresh ATR, structural swings, FVGs, Order Blocks, and HTF bias on bar close so an entry trigger only executes light checks.
+- **Broker Constraints & Idempotency**: Auto-detects allowed filling modes (`FOK` $\to$ `IOC` $\to$ `RETURN`), validates `stops_level` and `freeze_level`, enforces mandatory server-side SL and TP on every order, handles requotes/off-quotes with bounded retries that re-validate quote and spread before each retry, and stamps a deterministic `client_order_id` (`CID_<SYM>_<DIR>_<HASH>`) so retries/reconnects never open duplicate positions.
+
+### 11.2 Scalp Entry Mode (`src/execution/fast_mode_engine.py`)
+- **Timeframes**: Evaluates closed candles on `M1` or `M5` (configurable) aligned with `M15`/`H1` HTF bias and active session affinity.
+- **Triggers**: Confirmed `BOS_CONFIRMED` after `CHoCH`, FVG/OB mitigation, or displacement + rejection candle/chart pattern.
+- **Filters**: Spread $\le 10\%$ of SL distance, ATR within `[atr_floor_points, atr_ceiling_points]`, SL beyond invalidation swing/zone with $\ge 2.0\text{R}$ measured target, post-trade cooldown (`120s`), and max trades per symbol per hour (`3`).
+
+### 11.3 Fast Tick Exit Manager (`src/execution/fast_exit_manager.py`)
+- Runs on every tick for open positions (respecting broker `stops_level` and `freeze_level`):
+  - **Break-Even**: Moves SL to entry + spread + buffer at `+0.5R` / `+1.0R`.
+  - **Partial TP & Swing/ATR Trail**: Closes configurable fraction (`50%`) at `+1.0R` and trails remaining SL behind confirmed swing lows/highs or `1.5x ATR`.
+  - **Time Stop & Momentum Failure**: Exits if trade does not reach `+0.5R` within `N` bars/seconds or if a closed candle breaks against the position with displacement.
+  - **Protective Flatten**: Exits before session end, rollover blackout, or high-impact news; blocks widening SL during spread spikes (`> 3x` median spread).
+  - Tracks MFE/MAE in R and logs every modification/close at `TRADE` level.
+
+### 11.4 Speed Risk Guardrails (`src/risk/fast_risk_guard.py`)
+- **Lot Sizing**: Strictly rounded **down** to `lot_step` (`normalize_volume_down`).
+- **Small-Account Awareness (`ForceMinLotRiskFloor`)**: Computes minimum balance needed to trade `min_lot` at configured risk % for the current SL distance; skips the trade and logs a clear `DECISION` message (`"<SYMBOL> skipped: min lot (0.01) risks X% > Y% cap; needs about $Z balance or a cent/micro account"`) if `min_lot` exceeds the cap.
+- **Margin Level Guards**: Requires projected margin level $\ge 300\%$ after entry; triggers immediate protective flatten and pause if margin level drops $\le 150\%$.
+- **Anti-Stacking / Anti-Grid / Anti-Martingale**: Enforces combined open-risk cap across all positions, prohibits averaging down into losing positions, and blocks lot increases after a loss.
+- **Circuit Breakers**: Consecutive-loss breaker (`2` losses) and Equity-Velocity Kill Switch (floating loss $> 2.5\%$ of equity within `60s` flattens all and pauses with `CRITICAL` alert).
+
+### 11.5 Always-On Reliability, Watchdog & Telegram Controls (`src/execution/watchdog.py`)
+- **Heartbeat & Reconnect Reconciliation**: Compares expected vs MT5 actual positions on reconnect and every `15s`; flags missing/unexpected tickets and SL/TP discrepancies; enters Safe State (halting new entries while keeping server-side SL/TP intact) on disconnect, stale tick (`> 5s`), or clock drift (`> 10s`).
+- **Graceful Shutdown**: Cancels orphaned pending orders while leaving open positions protected by server-side SL/TP.
+- **Telegram Commands**: `/fastmode on|off`, `/pause`, `/resume`, `/flatten` (strictly authenticated by `chat_id`), `/fastquality`, and `/margin`.
+- **Walk-Forward Verdict (`reports/fast_mode_performance.json`)**: Fast Mode improved net expectancy after spread, commission, slippage, and `25ms` latency from `+0.144R` to `+0.358R` (`+0.214R` gain), increased Profit Factor from `1.37` to `6.21`, and reduced Max Drawdown from `12.06R` to `1.61R`.

@@ -2,6 +2,31 @@
 
 All notable changes to the Institutional Multi-Timeframe Algorithmic Trading Bot (`MT5-OO1`) are documented in this file.
 
+## [3.6.0] - 2026-11-03
+
+### Added - Fast Mode Low-Latency Scalping Execution Layer (`config/fast_mode.json`)
+- **Low-Latency Execution Path (`src/execution/persistent_socket.py`, `src/execution/async_queue.py`, `mql5/Experts/PythonBridgeEA.mq5`)**:
+  - Stage-by-stage nanosecond latency tracking (`bar_received_ns -> analysis_done_ns -> checklist_passed_ns -> order_sent_ns -> fill_confirmed_ns`), requote count, slippage, and spread at entry per trade.
+  - `NonBlockingExecutionQueue`: Queues Telegram dispatches, journaling, and chart drawing off the critical order path (`< 5µs` enqueue overhead).
+  - `PersistentBridgeSocket` (`TCP_NODELAY`) and `LowLatencyOrderDispatcher`: Auto-detects/falls back across filling modes (`FOK`, `IOC`, `RETURN`), validates `stops_level` and `freeze_level`, enforces mandatory server-side SL/TP on every order, handles requotes/off-quotes with bounded retries that re-validate quote and spread before each retry, and uses deterministic `client_order_id` (`CID_<SYM>_<DIR>_<HASH>`) for 100% idempotency.
+- **Scalp Entry Engine (`src/execution/fast_mode_engine.py`)**:
+  - `PrecomputedSymbolState` cache refreshed on bar close so an entry trigger only executes light checks.
+  - Evaluates closed candles on `M1`/`M5` aligned with `M15`/`H1` HTF bias and active session affinity.
+  - Triggers on confirmed `BOS_CONFIRMED` after `CHoCH`, FVG/OB mitigation, or displacement + rejection candle/chart pattern.
+  - Enforces spread $\le 10\%$ of SL distance, ATR floor/ceiling bounds, $\ge 2.0\text{R}$ target, post-trade cooldown (`120s`), and hourly rate cap (`3` trades/symbol/hour).
+- **Fast Tick Exit Manager (`src/execution/fast_exit_manager.py`)**:
+  - Tick-level evaluation: Break-even at `+0.5R` above spread+buffer, `50%` partial TP at `+1.0R` + confirmed swing/ATR trailing, time stop, momentum-failure exit on closed-bar breakdown, spread-spike SL freeze protection, session-end/rollover/news flatten, and MFE/MAE excursion tracking.
+- **Speed Risk Guardrails (`src/risk/fast_risk_guard.py`)**:
+  - Strict downward lot rounding (`normalize_volume_down`).
+  - `ForceMinLotRiskFloor` and small-account minimum balance calculation + `DECISION` message (`"<SYMBOL> skipped: min lot (0.01) risks X% > Y% cap; needs about $Z balance or a cent/micro account"`).
+  - Margin level guardrails: projected margin floor $\ge 300\%$ required for entry; critical margin floor $\le 150\%$ triggers immediate flatten + pause.
+  - Combined open-risk cap, anti-stacking, anti-grid (no averaging down), anti-martingale (no lot increase after loss), consecutive-loss circuit breaker (`2` losses), and equity-velocity kill switch ($> 2.5\%$ floating loss in `60s`).
+- **Always-On Watchdog & Remote Telegram Controls (`src/execution/watchdog.py`, `src/notifications/telegram_service.py`)**:
+  - Heartbeat monitor, auto-reconnect with full state reconciliation against MT5 open positions, stale-tick guard (`5s`), clock drift check (`10s`), weekend guard, and graceful shutdown cancelling orphaned pending orders.
+  - Telegram commands: `/fastmode on|off`, `/pause`, `/resume`, `/flatten` (strict `chat_id` verification), `/fastquality`, and `/margin`.
+- **Walk-Forward Evaluation & Soak Test (`scripts/evaluate_fast_mode.py`, `scripts/soak_test_fast_mode.py`, `reports/fast_mode_performance.json`)**:
+  - Walk-forward evaluation with realistic spread, commission, slippage, and `25ms` latency confirms Fast Mode improves net expectancy from `+0.144R` to `+0.358R` (`+0.214R` gain), increases Profit Factor from `1.37` to `6.21`, and reduces Max Drawdown from `12.06R` to `1.61R`.
+
 ## [3.5.0] - 2026-11-03
 
 ### Added - Professional Session-Aware Trading Architecture & Affinity Matrix

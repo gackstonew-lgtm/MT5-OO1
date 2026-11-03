@@ -2496,6 +2496,15 @@ string ProcessCommand(const string json)
       double deal_price = 0.0;
       string last_err = "";
 
+      // Auto-detect broker filling mode (FOK / IOC / RETURN) & max deviation
+      g_trade.SetTypeFillingBySymbol(sym);
+      long req_dev = ExtractJsonInteger(json, "deviation", 15);
+      if(req_dev > 0) g_trade.SetDeviationInPoints((ulong)req_dev);
+      string req_fill = ExtractJsonString(json, "filling_mode", "");
+      if(req_fill == "IOC") g_trade.SetTypeFilling(ORDER_FILLING_IOC);
+      else if(req_fill == "RETURN") g_trade.SetTypeFilling(ORDER_FILLING_RETURN);
+      else if(req_fill == "FOK") g_trade.SetTypeFilling(ORDER_FILLING_FOK);
+
       for(int attempt = 1; attempt <= 3; attempt++)
       {
          double ask = SymbolInfoDouble(sym, SYMBOL_ASK);

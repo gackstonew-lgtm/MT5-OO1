@@ -1,0 +1,86 @@
+{
+  "enabled": false,
+  "default_account_mode": "DEMO",
+  "allowed_symbols": [
+    "XAUUSD",
+    "XAUUSD.m",
+    "EURUSD",
+    "EURUSD.m",
+    "GBPUSD",
+    "GBPUSD.m",
+    "NAS100",
+    "NAS100.m",
+    "US30",
+    "US30.m"
+  ],
+  "entry_timeframe": "M5",
+  "supported_entry_timeframes": ["M1", "M5"],
+  "htf_bias_timeframes": ["M15", "H1"],
+  "execution": {
+    "persistent_socket": true,
+    "non_blocking_notifications": true,
+    "auto_detect_filling_mode": true,
+    "preferred_filling_modes": ["FOK", "IOC", "RETURN"],
+    "max_retries_on_requote": 3,
+    "retry_delay_ms": 50,
+    "revalidate_price_and_spread_on_retry": true,
+    "require_server_side_sl_tp": true,
+    "assumed_latency_ms_backtest": 25.0,
+    "max_deviation_points": {
+      "XAUUSD": 30,
+      "EURUSD": 10,
+      "GBPUSD": 12,
+      "NAS100": 40,
+      "US30": 40,
+      "DEFAULT": 15
+    }
+  },
+  "scalp_entry": {
+    "max_spread_pct_of_sl": 10.0,
+    "atr_floor_points": 5.0,
+    "atr_ceiling_points": 1500.0,
+    "min_reward_to_risk": 2.0,
+    "cooldown_seconds_after_trade": 120,
+    "max_trades_per_symbol_per_hour": 3,
+    "require_closed_candle": true,
+    "require_session_affinity": true
+  },
+  "fast_exit": {
+    "enabled": true,
+    "break_even_trigger_r": 0.5,
+    "break_even_buffer_points": 5.0,
+    "partial_tp_trigger_r": 1.0,
+    "partial_tp_close_fraction": 0.5,
+    "trail_mode": "SWING_OR_ATR",
+    "trail_atr_multiplier": 1.5,
+    "time_stop_bars": 12,
+    "time_stop_seconds": 3600,
+    "momentum_failure_exit": true,
+    "spread_spike_multiplier": 3.0,
+    "flatten_before_session_end_minutes": 5,
+    "flatten_before_rollover": true,
+    "flatten_before_high_impact_news": true
+  },
+  "risk_guardrails": {
+    "max_risk_percent_per_trade": 1.0,
+    "force_min_lot_risk_floor": true,
+    "min_projected_margin_level_pct": 300.0,
+    "critical_margin_level_pct": 150.0,
+    "max_combined_open_risk_pct_equity": 3.0,
+    "allow_same_direction_stacking": false,
+    "max_concurrent_positions_global": 3,
+    "max_concurrent_positions_per_symbol": 1,
+    "consecutive_loss_limit": 2,
+    "equity_velocity_loss_pct": 2.5,
+    "equity_velocity_window_seconds": 60,
+    "prohibit_martingale": true,
+    "prohibit_grid_averaging": true
+  },
+  "reliability": {
+    "heartbeat_interval_seconds": 5,
+    "reconciliation_interval_seconds": 15,
+    "stale_tick_max_age_seconds": 5.0,
+    "max_clock_drift_seconds": 10.0,
+    "cancel_orphaned_pendings_on_shutdown": true
+  }
+}
