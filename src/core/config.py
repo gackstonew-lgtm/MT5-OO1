@@ -206,6 +206,18 @@ class AppConfig:
     session: SessionConfig = field(default_factory=SessionConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
 
+    # Quant Best-Practice Upgrade Flags (Strangler Pattern, default False)
+    upgrade_enabled: bool = False
+    broker_adapter_enabled: bool = False
+    feature_pipeline_enabled: bool = False
+    modular_strategy_enabled: bool = False
+    scbf_enabled: bool = False
+    chart_visualization_enabled: bool = False
+    ab_harness_enabled: bool = False
+    meta_labeling_enabled: bool = False
+    bridge_extensions_enabled: bool = False
+    validation_gates_enabled: bool = False
+
     def get_magic_for_symbol(self, symbol: str) -> int:
         offset = self.symbol_magic_offsets.get(symbol, (abs(hash(symbol)) % 900) + 10)
         return self.magic_number + offset
@@ -237,6 +249,13 @@ class AppConfig:
                         cfg.symbol_magic_offsets = data["symbol_magic_offsets"]
                     if "dry_run" in data:
                         cfg.dry_run = bool(data["dry_run"])
+                    if "upgrade" in data and isinstance(data["upgrade"], dict):
+                        ud = data["upgrade"]
+                        if "enabled" in ud:
+                            cfg.upgrade_enabled = bool(ud["enabled"])
+                        for k in ["broker_adapter_enabled", "feature_pipeline_enabled", "modular_strategy_enabled", "scbf_enabled", "chart_visualization_enabled", "ab_harness_enabled", "meta_labeling_enabled", "bridge_extensions_enabled", "validation_gates_enabled"]:
+                            if k in ud and hasattr(cfg, k):
+                                setattr(cfg, k, bool(ud[k]))
             except Exception as e:
                 print(f"[Config] Error loading settings.json: {e}")
 

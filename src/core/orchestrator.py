@@ -66,6 +66,13 @@ class TradingBotOrchestrator:
             portfolio_risk=self.portfolio_risk
         )
 
+        # Hook 1: Broker Adapter Delegation (Strangler Pattern)
+        if getattr(self.config, 'upgrade_enabled', False) and getattr(self.config, 'broker_adapter_enabled', False):
+            from src.adapters.broker_factory import BrokerFactory
+            self.broker = BrokerFactory.create_broker(self.config, self.bridge)
+        else:
+            self.broker = None
+
         # 5. Learning & Tracking
         self.performance_tracker = PerformanceTracker()
         champion_cand = StrategyCandidate(
