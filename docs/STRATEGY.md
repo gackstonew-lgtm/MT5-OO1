@@ -83,3 +83,31 @@ Every setup is scored across 9 dimensions:
 4. **Fractional Kelly:** Caps sizing based on proven out-of-sample edge. If expectancy is non-positive, size is strictly 0.
 5. **Drawdown Throttle:** Reduces risk by 30% at mild DD, 60% at heavy DD, and pauses completely at 80% buffer utilization.
 6. **Decay Guard:** CUSUM drift detection halts trading if live performance falls 3.0 sigmas below baseline expectation.
+
+## 6. Multi-Phase Quantitative Execution Architecture (V3.3 Upgrade)
+
+### Phase 1: CHoCH-Warning -> BOS-Confirmation
+- Sequential closed-candle state machine prevents entering on traps and fakeouts.
+- Structural SL anchored behind the pullback swing extreme (LH/HL).
+
+### Phase 2: Locked Trade Plan
+- Immutable `TradePlan` dataclass created prior to order submission.
+- Preserves entry, SL, TP, lots, risk %, R:R, and structural state.
+- Lifecycle amendments (break-even, trailing, partials) logged as explicit `PlanAmendment` records.
+
+### Phase 3: Monte Carlo "Time Machine" Replay Gate
+- Simulates 10,000 block-bootstrapped price paths from recent closed bars before order approval.
+- Computes empirical P(target), P(stop), P(neither), expected R, and 95% confidence interval.
+- Rejects coin flips and negative edge at DECISION level.
+
+### Phase 4: Human Confirm Gate & Paper Shadow Journal
+- Interactive operator confirmation (120s timeout) for LIVE/PROP accounts; DEMO auto-executes.
+- Continuous forward outcome tracking in shadow journal for taken and filtered setups.
+- Real-time `/shadow_report` command validates filter performance.
+
+### Phase 5: Multi-Symbol Opportunity Scanner & News Blackout
+- 5-factor scoring model ranks all symbols on M15 close: Structure, HTF alignment, Spread/ATR, Session liquidity, News proximity.
+- High-impact macroeconomic calendar blackout window (15m before/after).
+
+### Phase 6: Exit Machine
+- Configurable optional exit rules (default OFF): Time-stop, Session-end flatten, 1R Partial with BE, Structure-based swing trailing stop.

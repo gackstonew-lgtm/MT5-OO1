@@ -6,7 +6,7 @@ Provides immutable and validated models for market data, signals, orders, and ri
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 
 
@@ -376,6 +376,7 @@ class SignalCandidate:
     fvg: Optional[FairValueGap] = None
     ob: Optional[OrderBlock] = None
     related_level: Optional[str] = None  # e.g. "PDL_SWEEP", "PWH_BREAKOUT"
+    trade_plan: Optional[Any] = None
 
 
 @dataclass
@@ -459,3 +460,75 @@ class DecisionOutcome:
             return f"TRADE SKIPPED: {code} | {self.details}"
         else:
             return f"NO SETUP: {self.details}"
+
+
+@dataclass(frozen=True)
+class PlanAmendment:
+    amendment_type: str  # "BREAK_EVEN", "TRAILING_STOP", "PARTIAL_TP"
+    old_sl: float
+    new_sl: float
+    timestamp: datetime
+    reason: str
+    old_tp: Optional[float] = None
+    new_tp: Optional[float] = None
+    partial_volume: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class TradePlan:
+    plan_id: str
+    symbol: str
+    direction: OrderType
+    entry_price: float
+    stop_loss: float
+    take_profit: float
+    lots: float
+    risk_percent: float
+    reward_to_risk: float
+    structure_state: str
+    timestamp: datetime
+    amendments: Tuple[PlanAmendment, ...] = field(default_factory=tuple)
+
+    def with_amendment(self, amendment: PlanAmendment) -> TradePlan:
+        """Returns a new immutable TradePlan instance containing the amendment."""
+        return TradePlan(
+            plan_id=self.plan_id,
+            symbol=self.symbol,
+            direction=self.direction,
+            entry_price=self.entry_price,
+            stop_loss=amendment.new_sl if amendment.new_sl > 0 else self.stop_loss,
+            take_profit=amendment.new_tp if (amendment.new_tp is not None and amendment.new_tp > 0) else self.take_profit,
+            lots=self.lots if amendment.partial_volume is None else max(0.0, round(self.lots - amendment.partial_volume, 2)),
+            risk_percent=self.risk_percent,
+            reward_to_risk=self.reward_to_risk,
+            structure_state=self.structure_state,
+            timestamp=self.timestamp,
+            amendments=self.amendments + (amendment,)
+        )
+
+    def format_log(self) -> str:
+        d_str = self.direction.value if hasattr(self.direction, "value") else str(self.direction)
+        ts_str = self.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+        return (
+            f"[LOCKED_TRADE_PLAN] PlanID={self.plan_id} | Symbol={self.symbol} | "
+            f"Direction={d_str} | Entry={self.entry_price:.5f} | SL={self.stop_loss:.5f} | "
+            f"TP={self.take_profit:.5f} | Lots={self.lots:.2f} | Risk={self.risk_percent:.2f}% | "
+            f"R:R=1:{self.reward_to_risk:.2f} | Structure={self.structure_state} | Timestamp={ts_str}"
+        )
+
+    def format_signal_text(self) -> str:
+        d_str = self.direction.value if hasattr(self.direction, "value") else str(self.direction)
+        return (
+            f"📋 <b>LOCKED TRADE PLAN</b>\n"
+            f"• <b>Plan ID:</b> <code>{self.plan_id}</code>\n"
+            f"• <b>Symbol:</b> <code>{self.symbol}</code>\n"
+            f"• <b>Direction:</b> <code>{d_str}</code>\n"
+            f"• <b>Entry:</b> <code>{self.entry_price:.5f}</code>\n"
+            f"• <b>Stop Loss:</b> <code>{self.stop_loss:.5f}</code>\n"
+            f"• <b>Take Profit:</b> <code>{self.take_profit:.5f}</code>\n"
+            f"• <b>Volume:</b> <code>{self.lots:.2f} lots</code>\n"
+            f"• <b>Risk %:</b> <code>{self.risk_percent:.2f}%</code>\n"
+            f"• <b>Reward/Risk:</b> <code>1:{self.reward_to_risk:.2f}</code>\n"
+            f"• <b>Structure:</b> <code>{self.structure_state}</code>\n"
+            f"• <b>Locked at:</b> <code>{self.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}</code>"
+        )

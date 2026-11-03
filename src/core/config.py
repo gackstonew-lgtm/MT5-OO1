@@ -148,6 +148,11 @@ class RiskConfig:
     partial_tp_ratio: float = 0.5
     trailing_stop_enabled: bool = True
     trailing_stop_atr_multiplier: float = 1.5
+    enable_time_stop: bool = False
+    time_stop_max_bars: int = 32
+    enable_session_end_flatten: bool = False
+    enable_partial_at_1r: bool = False
+    enable_swing_trailing: bool = False
 
 
 @dataclass

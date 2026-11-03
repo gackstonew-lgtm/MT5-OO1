@@ -163,7 +163,8 @@ class TelegramNotifier:
         rr: float,
         lots: float,
         risk_pct: float,
-        reason: str
+        reason: str,
+        trade_plan: Optional[Any] = None
     ) -> None:
         """Dispatches High-Quality Multi-Timeframe Setup Detection."""
         dir_emoji = "🟢" if "BUY" in direction.upper() else "🔴"
@@ -175,7 +176,7 @@ class TelegramNotifier:
             f"🎯 <b>TP:</b> <code>{tp:.5f}</code>\n"
             f"⚖️ <b>R:R:</b> <code>1:{rr:.2f}</code>\n"
             f"📦 <b>Sizing:</b> <code>{lots:.2f} lots</code> ({risk_pct:.1f}% Risk)\n"
-            f"📝 <b>Reason:</b> <i>{escape_html(reason)}</i>"
+            f"📝 <b>Reason:</b> <i>{escape_html(reason)}</i>" + (f"\n\n{trade_plan.format_signal_text()}" if trade_plan and hasattr(trade_plan, "format_signal_text") else "")
         )
         self.send_raw_html(self._format_header_footer(body, symbol=symbol))
 
@@ -871,6 +872,9 @@ class TelegramCommandHandler:
         self._poll_thread: Optional[threading.Thread] = None
         self._last_update_id = 0
         self._pending_confirmation: Optional[Tuple[str, float]] = None  # (action, timestamp)
+        self.confirm_mode: bool = False
+        self.shadow_journal: Optional[Any] = None
+        self._pending_trade_confirm: Optional[Dict[str, Any]] = None
 
         if self.config.enabled:
             self.start()
@@ -937,6 +941,28 @@ class TelegramCommandHandler:
 
         logger.info(f"[Telegram] Command received from {sender_name}: '{text}'")
 
+        # Check pending trade plan confirmation for LIVE/PROP
+        if self._pending_trade_confirm:
+            req_time = self._pending_trade_confirm["time"]
+            plan_id = self._pending_trade_confirm["plan_id"]
+            if time.time() - req_time <= self._pending_trade_confirm["timeout"]:
+                if text.lower() in ("yes", "y", "confirm"):
+                    self._pending_trade_confirm["confirmed"] = True
+                    self._pending_trade_confirm["event"].set()
+                    self._reply(f"✅ Trade plan <code>{escape_html(plan_id)}</code> <b>CONFIRMED</b>. Executing order...")
+                    self._pending_trade_confirm = None
+                    return
+                elif text.lower() in ("no", "n", "cancel"):
+                    self._pending_trade_confirm["confirmed"] = False
+                    self._pending_trade_confirm["event"].set()
+                    self._reply(f"❌ Trade plan <code>{escape_html(plan_id)}</code> <b>CANCELLED</b> by operator.")
+                    self._pending_trade_confirm = None
+                    return
+            else:
+                self._pending_trade_confirm["confirmed"] = False
+                self._pending_trade_confirm["event"].set()
+                self._pending_trade_confirm = None
+
         # Check pending 30-second confirmation for /closeall or /killswitch
         if self._pending_confirmation:
             action, req_time = self._pending_confirmation
@@ -996,6 +1022,10 @@ class TelegramCommandHandler:
             self._handle_disable()
         elif cmd == "closeall":
             self._handle_closeall_request()
+        elif cmd == "confirm_mode":
+            self._handle_confirm_mode(text)
+        elif cmd == "shadow_report":
+            self._handle_shadow_report()
         elif cmd == "killswitch":
             self._handle_killswitch_request()
         else:
@@ -1458,3 +1488,55 @@ class TelegramCommandHandler:
             if self.killswitch_handler:
                 self.killswitch_handler()
             self._reply("☠️ <b>KILL SWITCH ENGAGED</b>: All positions liquidated and bot halted.")
+
+    def _handle_confirm_mode(self, text: str) -> None:
+        parts = text.split()
+        if len(parts) >= 2:
+            arg = parts[1].lower()
+            if arg in ("on", "1", "true", "enable"):
+                self.confirm_mode = True
+                self._reply("✅ <b>Human Confirm Mode: ENABLED</b>\nIn LIVE/PROP modes, trade plans will require interactive operator confirmation within 120s.")
+                return
+            elif arg in ("off", "0", "false", "disable"):
+                self.confirm_mode = False
+                self._reply("❌ <b>Human Confirm Mode: DISABLED</b>\nAutomatic execution restored.")
+                return
+        status_str = "ENABLED" if self.confirm_mode else "DISABLED"
+        self._reply(f"ℹ️ <b>Human Confirm Mode:</b> <code>{status_str}</code>\nUsage: <code>/confirm_mode on|off</code>")
+
+    def _handle_shadow_report(self) -> None:
+        if self.shadow_journal and hasattr(self.shadow_journal, "format_telegram_report"):
+            self._reply(self.shadow_journal.format_telegram_report())
+        else:
+            self._reply("📊 <b>Shadow Report:</b> No active shadow journal registered.")
+
+    def request_trade_confirmation(self, plan: Any, timeout_sec: int = 120) -> bool:
+        """
+        Sends TradePlan confirmation prompt and blocks for user 'yes' confirmation up to timeout_sec.
+        DEMO mode bypasses this and returns True.
+        """
+        if not self.config.enabled:
+            return True
+        event = threading.Event()
+        self._pending_trade_confirm = {
+            "plan_id": plan.plan_id,
+            "time": time.time(),
+            "timeout": timeout_sec,
+            "event": event,
+            "confirmed": False
+        }
+        prompt = (
+            f"🔔 <b>TRADE PLAN CONFIRMATION REQUIRED (LIVE/PROP)</b>\n\n"
+            f"{plan.format_signal_text()}\n\n"
+            f"⚠️ <b>Action Required:</b> Reply <code>yes</code> to authorize order or <code>no</code> to cancel.\n"
+            f"⏱️ <i>Auto-cancels in {timeout_sec} seconds.</i>"
+        )
+        self._reply(prompt)
+        finished = event.wait(timeout=float(timeout_sec))
+        if not finished:
+            self._reply(f"⏱️ Confirmation for <code>{escape_html(plan.plan_id)}</code> timed out ({timeout_sec}s). Order automatically cancelled.")
+            self._pending_trade_confirm = None
+            return False
+        confirmed = bool(self._pending_trade_confirm and self._pending_trade_confirm.get("confirmed", False))
+        self._pending_trade_confirm = None
+        return confirmed

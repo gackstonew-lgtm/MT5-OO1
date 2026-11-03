@@ -2,6 +2,36 @@
 
 All notable changes to the Institutional Multi-Timeframe Algorithmic Trading Bot (`MT5-OO1`) are documented in this file.
 
+## [3.3.0] - 2026-11-03
+
+### Added - 6-Phase Advanced Quantitative Execution Subsystems
+- **Phase 1: CHoCH-Warning -> BOS-Confirmation State Machine (`src/smc/structure_confirmation.py`)**:
+  - Deterministic closed-candle state machine (`IDLE -> CHOCH_WARNING -> PULLBACK -> BOS_CONFIRMED -> FAILED_TRAP`).
+  - Gated entries behind BOS confirmation; anchored SL behind confirmed LH/HL.
+- **Phase 2: Locked Immutable Trade Plan (`src/core/contracts.py`, `src/execution/order_manager.py`)**:
+  - Immutable `TradePlan` dataclass binding entry, SL, TP, lots, risk %, R:R, and structural state.
+  - Plan lifecycle shifts (break-even, trailing, partials) logged as explicit immutable `PlanAmendment` records.
+- **Phase 3: Monte Carlo "Time Machine" Replay Gate (`src/risk/replay_gate.py`)**:
+  - Vectorized block-bootstrap simulation over 10,000 M15 price paths (<2s runtime, deterministic trade seed).
+  - Pre-trade gating on $P(\text{target}) > P(\text{stop}) + \text{edge}$ and minimum expected R.
+  - Monte Carlo trade-result sequence drawdown estimation in `scripts/run_backtest.py`.
+- **Phase 4: Human Confirm Gate & Paper Shadow Journal (`src/monitoring/shadow_journal.py`, `src/notifications/telegram_service.py`)**:
+  - Interactive operator confirmation (120s timeout) for LIVE/PROP modes with `/confirm_mode on|off`.
+  - DEMO mode auto-executes; unauthorized chats rejected.
+  - Forward tracking of taken and rejected setups; `/shadow_report` command.
+- **Phase 5: Multi-Symbol Opportunity Scanner & News Blackout (`src/smc/symbol_scanner.py`, `src/smc/news_filter.py`)**:
+  - 5-factor scoring model ranking symbols on M15 close: Structure, HTF alignment, Spread/ATR, Session liquidity, News proximity.
+  - High-impact macroeconomic calendar blackout window (15m before/after).
+- **Phase 6: Exit Machine (`src/risk/trade_management.py`, `config/risk_config.json`)**:
+  - Configurable optional exit rules (default OFF): Time Stop (X bars), End-of-Session Flatten, 1.0R Partial + BE, Structure-Based Swing Trailing.
+  - All exit actions logged at `[TRADE]` level.
+- **Verification & Test Coverage**:
+  - 152 automated tests passing (`Ran 152 tests in 78s. OK`).
+  - Golden Master 8,640 decisions 100% bit-for-bit identical.
+  - Deep verification 12/12 suites passing (100%).
+  - MetaEditor: 0 errors, 0 warnings.
+  - Secret scan: 0 secrets found.
+
 ## [3.2.0] - 2026-11-03
 
 ### Added - CHoCH-Warning -> BOS-Confirmation State Machine & Structure Lifecycle

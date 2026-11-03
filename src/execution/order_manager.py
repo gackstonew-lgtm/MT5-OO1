@@ -11,11 +11,12 @@ from typing import Dict, List, Optional, Tuple, Set
 
 from src.core.contracts import (
     SignalCandidate, TradeOrder, Position, AccountInfo, SymbolInfo,
-    OrderType, ExecutionMode
+    OrderType, ExecutionMode, TradePlan, PlanAmendment
 )
 from src.core.config import AppConfig
 from src.risk.position_sizing import PositionSizingEngine, PositionSizeResult
 from src.risk.portfolio_risk import PortfolioRiskEngine
+from src.risk.replay_gate import MonteCarloReplayGate, ReplayGateResult
 from src.execution.bridge_client import BridgeClient
 
 
@@ -25,6 +26,7 @@ class PreTradeCheckResult:
     rejection_reasons: List[str] = field(default_factory=list)
     calculated_volume: float = 0.0
     monetary_risk: float = 0.0
+    trade_plan: Optional[TradePlan] = None
 
 
 class OrderManager:
@@ -42,13 +44,19 @@ class OrderManager:
         self.simulated_positions: List[Position] = []
         self._sim_ticket_counter = 500000
         self._executed_signal_ids: Set[str] = set()
+        self._active_trade_plans: Dict[int, TradePlan] = {}
+        self._signal_trade_plans: Dict[str, TradePlan] = {}
+        self.replay_gate = MonteCarloReplayGate(enabled=getattr(self.config.risk, "enable_replay_gate", False))
+        self.telegram_cmd_handler: Optional[Any] = None
+        self.shadow_journal: Optional[Any] = None
 
     def run_pre_trade_checklist(
         self,
         candidate: SignalCandidate,
         account: AccountInfo,
         symbol_info: SymbolInfo,
-        active_positions: List[Position]
+        active_positions: List[Position],
+        recent_candles: Optional[List[Candle]] = None
     ) -> PreTradeCheckResult:
         """
         Executes strict 10-point Pre-Trade Validation Checklist.
@@ -142,12 +150,95 @@ class OrderManager:
                 if "CHoCH only" in r or "trapped" in r or "awaiting BOS" in r:
                     rejections.append(f"Pre-check failed (Structure): Structure confirmed (BOS after CHoCH) check failed: {r}")
 
+        # 12. Replay Gate passed
+        if self.replay_gate and self.replay_gate.enabled and recent_candles:
+            temp_plan = TradePlan(
+                plan_id=f"PLAN_{candidate.id}",
+                symbol=candidate.symbol,
+                direction=candidate.direction,
+                entry_price=candidate.entry_price,
+                stop_loss=candidate.stop_loss,
+                take_profit=candidate.take_profit,
+                lots=size_result.volume,
+                risk_percent=size_result.risk_percent_actual,
+                reward_to_risk=candidate.risk_reward,
+                structure_state="BOS_CONFIRMED",
+                timestamp=datetime.now(timezone.utc)
+            )
+            replay_res = self.replay_gate.evaluate_plan(
+                plan=temp_plan,
+                recent_candles=recent_candles,
+                spread_pts=float(symbol_info.spread),
+                point=float(symbol_info.point) if symbol_info.point > 0 else 0.00001
+            )
+            if not replay_res.passed:
+                rejections.append(f"Pre-check failed (Replay Gate): {replay_res.rejection_reason}")
+
         passed = len(rejections) == 0
+
+        structure_state_str = "BOS_CONFIRMED"
+        if hasattr(candidate, "rejection_reasons"):
+            for r in candidate.rejection_reasons:
+                if "CHoCH" in r or "trapped" in r:
+                    structure_state_str = "CHOCH_WARNING"
+        if hasattr(candidate, "reasons"):
+            for r in candidate.reasons:
+                if "BOS" in r:
+                    structure_state_str = "BOS_CONFIRMED"
+
+        plan = TradePlan(
+            plan_id=f"PLAN_{candidate.id}",
+            symbol=candidate.symbol,
+            direction=candidate.direction,
+            entry_price=candidate.entry_price,
+            stop_loss=candidate.stop_loss,
+            take_profit=candidate.take_profit,
+            lots=size_result.volume if passed else 0.0,
+            risk_percent=size_result.risk_percent_actual if passed else 0.0,
+            reward_to_risk=candidate.risk_reward,
+            structure_state=structure_state_str,
+            timestamp=datetime.now(timezone.utc)
+        )
+        candidate.trade_plan = plan
+        self._signal_trade_plans[candidate.id] = plan
+
+        # 13. Human Confirmed Gate (LIVE/PROP only when confirm_mode enabled; DEMO auto-executes)
+        if passed and self.config.execution_mode in (ExecutionMode.REAL, ExecutionMode.PROP):
+            if hasattr(self, "telegram_cmd_handler") and self.telegram_cmd_handler and getattr(self.telegram_cmd_handler, "confirm_mode", False):
+                confirmed = self.telegram_cmd_handler.request_trade_confirmation(plan, timeout_sec=120)
+                if not confirmed:
+                    rejections.append("Pre-check failed (Human Confirm): Trade plan confirmation timed out or cancelled by operator.")
+                    passed = False
+
+        if hasattr(self, "shadow_journal") and self.shadow_journal:
+            decision_label = "TAKEN" if passed else "REJECTED_CHECKLIST"
+            for r in rejections:
+                if "Structure" in r:
+                    decision_label = "REJECTED_BOS"
+                    break
+                elif "Replay Gate" in r:
+                    decision_label = "REJECTED_REPLAY"
+                    break
+            self.shadow_journal.record_setup(
+                setup_id=candidate.id,
+                symbol=candidate.symbol,
+                direction=candidate.direction,
+                entry_price=candidate.entry_price,
+                stop_loss=candidate.stop_loss,
+                take_profit=candidate.take_profit,
+                reward_to_risk=candidate.risk_reward,
+                decision=decision_label,
+                rejection_reasons=rejections
+            )
+        if passed:
+            import logging
+            logging.getLogger("OrderManager").info(plan.format_log())
         return PreTradeCheckResult(
             passed=passed,
             rejection_reasons=rejections,
             calculated_volume=size_result.volume if passed else 0.0,
-            monetary_risk=size_result.monetary_risk if passed else 0.0
+            monetary_risk=size_result.monetary_risk if passed else 0.0,
+            trade_plan=plan
         )
 
     def execute_signal(
@@ -155,13 +246,14 @@ class OrderManager:
         candidate: SignalCandidate,
         account: AccountInfo,
         symbol_info: SymbolInfo,
-        active_positions: List[Position]
+        active_positions: List[Position],
+        recent_candles: Optional[List[Candle]] = None
     ) -> Optional[TradeOrder]:
         """
         Executes pre-trade validation, then submits order to MT5 Bridge
         or simulates order execution in SIMULATION mode.
         """
-        check = self.run_pre_trade_checklist(candidate, account, symbol_info, active_positions)
+        check = self.run_pre_trade_checklist(candidate, account, symbol_info, active_positions, recent_candles=recent_candles)
         if not check.passed:
             candidate.status = "REJECTED"
             candidate.rejection_reasons.extend(check.rejection_reasons)
@@ -204,6 +296,8 @@ class OrderManager:
                 initial_sl_distance=abs(candidate.entry_price - candidate.stop_loss)
             )
             self.simulated_positions.append(new_pos)
+            if check.trade_plan:
+                self._active_trade_plans[sim_ticket] = check.trade_plan
             self._executed_signal_ids.add(candidate.id)
             self.portfolio_risk.register_trade_executed()
             candidate.status = "EXECUTED"
@@ -222,6 +316,8 @@ class OrderManager:
 
         if res.get("status") == "SUCCESS":
             ticket = int(res.get("ticket", 0))
+            if check.trade_plan and ticket > 0:
+                self._active_trade_plans[ticket] = check.trade_plan
             order = TradeOrder(
                 ticket=ticket,
                 symbol=candidate.symbol,
@@ -248,3 +344,24 @@ class OrderManager:
         if self.config.execution_mode in [ExecutionMode.SIMULATION, ExecutionMode.BACKTEST]:
             return list(self.simulated_positions)
         return self.bridge.get_positions()
+
+    def get_trade_plan(self, key: Any) -> Optional[TradePlan]:
+        if isinstance(key, int):
+            return self._active_trade_plans.get(key)
+        return self._signal_trade_plans.get(str(key))
+
+    def apply_plan_amendment(self, ticket: int, amendment: PlanAmendment) -> Optional[TradePlan]:
+        import logging
+        logger = logging.getLogger("OrderManager")
+        current_plan = self._active_trade_plans.get(ticket)
+        if not current_plan:
+            logger.warning(f"[PLAN_AMENDMENT] No active plan found for ticket #{ticket}")
+            return None
+        new_plan = current_plan.with_amendment(amendment)
+        self._active_trade_plans[ticket] = new_plan
+        logger.info(
+            f"[PLAN_AMENDMENT] Ticket #{ticket}: {amendment.amendment_type} | "
+            f"SL amended from {amendment.old_sl:.5f} to {amendment.new_sl:.5f} | "
+            f"Reason: {amendment.reason}"
+        )
+        return new_plan

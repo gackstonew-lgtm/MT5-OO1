@@ -96,3 +96,11 @@ flowchart TD
 - **Feature Drift Detector (`src/monitoring/feature_drift.py`)**: Population Stability Index (PSI) and Kolmogorov-Smirnov test over rolling 100 bars.
 - **Deal Reconciler (`src/monitoring/reconciliation.py`)**: Audits MT5 deal history against bot orders to detect price drift, volume discrepancies, or rogue deals.
 - **LLM Trade Reviewer (`src/monitoring/llm_reviewer.py`)**: Structured weekly review prompt template; remains completely silent when unconfigured.
+
+### Stage 7: Advanced Multi-Phase Execution Subsystems (v3.3 Upgrade)
+1. **Structure Confirmation State Machine (`src/smc/structure_confirmation.py`)**: Multi-stage state machine (`CHOCH_WARNING -> PULLBACK -> BOS_CONFIRMED -> FAILED_TRAP`) preventing fakeout traps and anchoring structural stop loss to the confirmed LH/HL.
+2. **Locked Trade Plan (`src/core/contracts.py`)**: Immutable `TradePlan` dataclass binding entry, SL, TP, lots, risk %, R:R, and structural state before execution. All lifecycle shifts tracked as explicit `PlanAmendment` records.
+3. **Monte Carlo Replay Gate (`src/risk/replay_gate.py`)**: Vectorized block-bootstrap simulation over 10,000 empirical M15 price paths. Gating on $P(\text{target}) > P(\text{stop}) + \text{edge}$ and expected R under 2 seconds.
+4. **Human Confirm Gate & Paper Shadow Journal (`src/monitoring/shadow_journal.py`, `src/notifications/telegram_service.py`)**: Interactive 120s operator approval in LIVE/PROP modes with `/confirm_mode`, and forward tracking of taken and rejected setups via `/shadow_report`.
+5. **Multi-Symbol Opportunity Scanner (`src/smc/symbol_scanner.py`, `src/smc/news_filter.py`)**: 5-factor scoring model ranking symbols on M15 close with high-impact macroeconomic news calendar blackout window.
+6. **Exit Machine (`src/risk/trade_management.py`)**: Configurable optional exit rules: Time Stop (X bars), End-of-Session Flatten, 1.0R Partial + BE, Structure-Based Swing Trailing.

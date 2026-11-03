@@ -250,7 +250,58 @@ def run_simulation(
         "total_pnl": round(total_pnl, 2),
         "final_balance": round(balance, 2),
         "max_drawdown": round(max_drawdown, 2),
-        "trapped_chochs_avoided": trapped_count
+        "trapped_chochs_avoided": trapped_count,
+        "trades": trades
+    }
+
+
+def run_monte_carlo_drawdown_analysis(trades: List[Dict[str, Any]], n_sims: int = 5000, risk_per_trade_pct: float = 1.0) -> Dict[str, Any]:
+    """
+    Monte Carlo simulation of trade-result sequence to estimate worst-case drawdown
+    against MaxDailyLoss and MaxTotalDrawdown for DEMO, LIVE, and PROP profiles.
+    """
+    if not trades:
+        return {}
+    r_vals = np.array([t.get("r_multiple", 0.0) for t in trades], dtype=np.float64)
+    n_trades = len(r_vals)
+    sim_len = max(50, n_trades)
+    rng = np.random.RandomState(42)
+
+    max_dds = []
+    demo_dd_breach = 0  # 10% DD cap
+    live_dd_breach = 0  # 6% DD cap
+    prop_dd_breach = 0  # 8% DD cap
+
+    for _ in range(n_sims):
+        sample = rng.choice(r_vals, size=sim_len, replace=True)
+        equity = 10000.0
+        peak = equity
+        worst_dd = 0.0
+        for r in sample:
+            pnl_pct = r * (risk_per_trade_pct / 100.0)
+            equity *= (1.0 + pnl_pct)
+            if equity > peak:
+                peak = equity
+            dd = (peak - equity) / peak * 100.0
+            if dd > worst_dd:
+                worst_dd = dd
+        max_dds.append(worst_dd)
+        if worst_dd >= 10.0:
+            demo_dd_breach += 1
+        if worst_dd >= 6.0:
+            live_dd_breach += 1
+        if worst_dd >= 8.0:
+            prop_dd_breach += 1
+
+    max_dds = np.array(max_dds)
+    return {
+        "n_sims": n_sims,
+        "median_max_dd": float(np.median(max_dds)),
+        "p95_max_dd": float(np.percentile(max_dds, 95)),
+        "p99_max_dd": float(np.percentile(max_dds, 99)),
+        "prob_breach_demo_10pct": float(demo_dd_breach / n_sims * 100.0),
+        "prob_breach_live_6pct": float(live_dd_breach / n_sims * 100.0),
+        "prob_breach_prop_8pct": float(prop_dd_breach / n_sims * 100.0)
     }
 
 
@@ -298,6 +349,19 @@ def main():
     print(f"{'Max Drawdown (%)':<32} | {b_dd:<22} | {f_dd:<22}")
     print(f"{'Trapped CHoCHs Avoided':<32} | {'N/A (Traded Raw)':<22} | {f_trap:<22}")
     print(f"{'Total Net PnL ($)':<32} | {b_pnl:<22} | {f_pnl:<22}")
+
+    # 3. Monte Carlo Drawdown Risk Analysis
+    mc_res = run_monte_carlo_drawdown_analysis(feat_res.get("trades", []))
+    if mc_res and "median_max_dd" in mc_res:
+        print("\n" + "=" * 80)
+        print("          MONTE CARLO DRAWDOWN RISK AUDIT (5,000 RESAMPLED PATHS)")
+        print("=" * 80)
+        print(f"  • Median Max Drawdown:         {mc_res['median_max_dd']:.2f}%")
+        print(f"  • 95th Percentile Drawdown:     {mc_res['p95_max_dd']:.2f}%")
+        print(f"  • 99th Percentile Drawdown:     {mc_res['p99_max_dd']:.2f}%")
+        print(f"  • P(Breach DEMO 10% DD Limit):  {mc_res['prob_breach_demo_10pct']:.2f}%")
+        print(f"  • P(Breach LIVE 6% DD Limit):   {mc_res['prob_breach_live_6pct']:.2f}%")
+        print(f"  • P(Breach PROP 8% DD Limit):   {mc_res['prob_breach_prop_8pct']:.2f}%")
     print("=" * 80)
 
 
