@@ -208,6 +208,19 @@ class TradingBotOrchestrator:
         mtf_ctx = self.mtf_analyzer.analyze(symbol, w1, d1, h4, h1, m15)
         self.active_contexts[symbol] = mtf_ctx
 
+        # Hook 2: Feature Pipeline Extraction (Strangler Pattern)
+        if getattr(self.config, 'upgrade_enabled', False) and getattr(self.config, 'feature_pipeline_enabled', False):
+            from src.features.feature_registry import FeaturePipeline
+            sym_info = self.market_data.get_symbol_info(symbol)
+            self._current_feature_snapshot = FeaturePipeline.extract_snapshot(
+                symbol=symbol,
+                m15_candles=m15,
+                h1_candles=h1,
+                h4_candles=h4,
+                d1_candles=d1,
+                point=sym_info.point if sym_info else 0.00001
+            )
+
         # 5. SCALP higher-timeframe agreement check
         if getattr(self.config.strategy, "scalp_require_htf_agreement", True):
             agree, msg, dirs = self.strategy_engine.check_scalp_htf_agreement(mtf_ctx)
