@@ -9,7 +9,7 @@ SECRET_PATTERNS = [
     ("Generic Password/Secret Key Assignment", re.compile(r'(?:api_key|secret_key|private_key|password)\s*=\s*[\"\'][A-Za-z0-9_\-\.\$\@\#\!]{8,}[\"\']', re.IGNORECASE)),
 ]
 
-IGNORED_DIRS = {'.git', '__pycache__', '.venv', 'venv', '.idea', '.vscode'}
+IGNORED_DIRS = {'.git', '__pycache__', '.venv', 'venv', '.idea', '.vscode', 'historical'}
 # .env is excluded from git, but we want to scan all files that could be staged
 EXCLUDED_EXTENSIONS = {'.ex5', '.png', '.jpg', '.jpeg', '.tar.gz', '.zip', '.pyc', '.wav'}
 

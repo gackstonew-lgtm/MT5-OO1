@@ -46,7 +46,13 @@ class TradingBotOrchestrator:
         self.mtf_analyzer = MultiTimeframeAnalyzer()
         self.strategy_engine = SmcStrategyEngine(
             min_score=self.config.strategy.min_confluence_score,
-            min_rr=self.config.risk.min_risk_reward_ratio
+            min_rr=self.config.risk.min_risk_reward_ratio,
+            swing_lookback=getattr(self.config.strategy, "swing_lookback_bars", 5),
+            require_close_break=getattr(self.config.strategy, "require_close_break", True),
+            require_lower_high=getattr(self.config.strategy, "require_lower_high", True),
+            choch_timeout_bars=getattr(self.config.strategy, "choch_timeout_bars", 20),
+            allow_choch_only_entries=getattr(self.config.strategy, "allow_choch_only_entries", False),
+            failed_choch_action=getattr(self.config.strategy, "failed_choch_action", "RESET_AND_LOG_TRAP")
         )
 
         # 3. Risk & Management
@@ -341,13 +347,14 @@ class TradingBotOrchestrator:
                 ticket=ticket
             )
             self._record_and_dispatch_outcome(outcome)
-            self.alerts.alert_trade_executed(
-                ticket=ticket,
-                symbol=order.symbol,
-                direction=order.order_type.value,
-                volume=order.volume,
-                price=order.entry_price
-            )
+            if hasattr(self, 'alerts') and self.alerts:
+                self.alerts.alert_trade_executed(
+                    ticket=ticket,
+                    symbol=order.symbol,
+                    direction=order.order_type.value,
+                    volume=order.volume,
+                    price=order.entry_price
+                )
             return best
         else:
             err = getattr(order, "error", None) or "Execution returned null or unfilled"

@@ -195,6 +195,13 @@ input color               InpColorPWL              = clrGreen;    // Previous We
 input color               InpColorPDH              = clrOrange;   // Previous Day High Color
 input color               InpColorPDL              = clrAqua;     // Previous Day Low Color
 
+//--- Input Parameters: Structure Visuals (CHoCH & BOS)
+input group "=== Structure Visuals (CHoCH & BOS) ==="
+input bool                InpDrawStructureLevels   = false;       // Draw CHoCH and BOS Levels on Chart
+input color               InpColorCHoCH            = clrOrange;   // CHoCH Warning Line Color
+input color               InpColorBOS              = clrDodgerBlue;// BOS Confirmed Line Color
+input color               InpColorTrap             = clrDarkGray; // Failed / Trapped CHoCH Color
+
 //--- Global Objects & State
 int            g_socket = INVALID_HANDLE;
 datetime       g_last_connect_attempt = 0;
@@ -4002,6 +4009,21 @@ void DrawWeeklyDailyLevels()
 void DeleteAllChartObjects()
 {
    ObjectsDeleteAll(0, "SMC_");
+}
+
+//+------------------------------------------------------------------+
+//| Draw CHoCH / BOS Structure Level on Chart                        |
+//+------------------------------------------------------------------+
+void DrawStructureLine(string name, double price, ENUM_LINE_STYLE style, color line_color, string label)
+{
+   if(!InpDrawStructureLevels || price <= 0.0) return;
+   string obj_name = "SMC_" + name;
+   ObjectDelete(0, obj_name);
+   ObjectCreate(0, obj_name, OBJ_HLINE, 0, 0, price);
+   ObjectSetInteger(0, obj_name, OBJPROP_COLOR, line_color);
+   ObjectSetInteger(0, obj_name, OBJPROP_STYLE, style);
+   ObjectSetInteger(0, obj_name, OBJPROP_WIDTH, (style == STYLE_SOLID) ? 2 : 1);
+   ObjectSetString(0, obj_name, OBJPROP_TEXT, label);
 }
 
 

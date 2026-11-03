@@ -36,7 +36,12 @@
     "ote_fib_lower": 0.62,
     "ote_fib_upper": 0.79,
     "equal_high_low_threshold_pips": 2.0,
-    "scalp_require_htf_agreement": true
+    "scalp_require_htf_agreement": true,
+    "require_close_break": true,
+    "require_lower_high": true,
+    "choch_timeout_bars": 20,
+    "allow_choch_only_entries": true,
+    "failed_choch_action": "RESET_AND_LOG_TRAP"
   },
   "scalp_require_htf_agreement": true
 }

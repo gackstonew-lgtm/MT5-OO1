@@ -32,7 +32,25 @@ W1 (Major Direction & Liquidity Boundaries)
 - Retracement into Fibonacci 0.62 - 0.79 zone.
 - Unmitigated FVG or Order Block confluence.
 
-## 3. Confluence Scoring System (Threshold >= 75 / 100)
+## 3. Structure Confirmation State Machine: CHoCH-Warning -> BOS-Confirmation
+To prevent entering on fakeouts and liquidity traps, all structural shifts follow a deterministic multi-stage lifecycle:
+
+1. **CHoCH = Warning Only:**
+   - A candle CLOSE beyond the most recent protected swing low (in an uptrend) or protected swing high (in a downtrend).
+   - Wicks strictly do not count (`require_close_break: true`).
+   - A CHoCH alone **never** opens a trade.
+2. **Sequential Confirmation Lifecycle:**
+   - `IDLE`: Normal trend tracking.
+   - `CHOCH_WARNING`: CHoCH detected; broken level, pre-CHoCH extreme (high/low), and bar index recorded. Emitted at `DECISION`/`INFO` level (silent Telegram digest).
+   - `PULLBACK`: Price retraces and forms a confirmed Lower High (bearish) or Higher Low (bullish) relative to the pre-CHoCH extreme.
+   - `BOS_CONFIRMED`: Price closes decisively beyond the post-CHoCH structural low (shorts) or high (longs). New-direction trade signals are unlocked and emitted at `SIGNAL` level.
+   - `FAILED_TRAP`: If price closes beyond the pre-CHoCH extreme without forming a confirming swing or BOS, the warning is invalidated, logged as a trap at `DECISION` level, and reset.
+   - `TIMEOUT`: If bars elapsed in warning/pullback exceed `choch_timeout_bars` (default 20), state expires back to `IDLE`.
+3. **Trade Gating & Structural Stop Loss:**
+   - Item #11 of the Pre-Trade Checklist validates "Structure confirmed (BOS after CHoCH)".
+   - Stop Loss is placed beyond the confirmed Lower High (shorts) or Higher Low (longs) + buffer.
+
+## 4. Confluence Scoring System (Threshold >= 75 / 100)
 Every setup is scored across 9 dimensions:
 - W1 Alignment: 15 pts
 - D1 Alignment: 15 pts
@@ -49,8 +67,9 @@ Every setup is scored across 9 dimensions:
 - Reward-to-Risk ratio >= 1:2.0
 - Acceptable broker spread
 - Risk management approval (no active circuit breaker)
+- Structure confirmation gate (BOS confirmed after CHoCH)
 
-## 4. Quantitative Safety and Filtering Layers (V2.0 Upgrade)
+## 5. Quantitative Safety and Filtering Layers (V2.0 Upgrade)
 
 ### Account-Size Adaptation ($5 Floor)
 1. **Dynamic Tier Sizing:** Evaluates `min(balance, equity)` against tier boundaries.

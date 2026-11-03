@@ -179,6 +179,12 @@ class StrategyConfig:
     ote_fib_entry_max: float = 0.79
     ote_fib_invalidation: float = 1.00
     scalp_require_htf_agreement: bool = True  # SCALP requires M15, H1, H4 agreement
+    swing_lookback_bars: int = 5
+    require_close_break: bool = True
+    require_lower_high: bool = True
+    choch_timeout_bars: int = 20
+    allow_choch_only_entries: bool = True
+    failed_choch_action: str = "RESET_AND_LOG_TRAP"
 
 
 @dataclass
@@ -268,6 +274,10 @@ class AppConfig:
                         cfg.strategy.scalp_require_htf_agreement = bool(sdata["scalp_require_htf_agreement"])
                     elif "ict_smc" in sdata and "scalp_require_htf_agreement" in sdata["ict_smc"]:
                         cfg.strategy.scalp_require_htf_agreement = bool(sdata["ict_smc"]["scalp_require_htf_agreement"])
+                    ict_data = sdata.get("ict_smc", sdata)
+                    for k in ["require_close_break", "require_lower_high", "choch_timeout_bars", "allow_choch_only_entries", "failed_choch_action", "swing_lookback_bars"]:
+                        if k in ict_data and hasattr(cfg.strategy, k):
+                            setattr(cfg.strategy, k, ict_data[k])
             except Exception as e:
                 print(f"[Config] Error loading strategy_config.json: {e}")
 

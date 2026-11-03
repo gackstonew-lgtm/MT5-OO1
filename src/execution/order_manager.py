@@ -135,6 +135,13 @@ class OrderManager:
         if size_result.margin_required > account.free_margin:
             rejections.append("Pre-check failed: Free margin insufficient.")
 
+        # 11. Structure Confirmation (BOS after CHoCH)
+        allow_choch_only = getattr(self.config.strategy, "allow_choch_only_entries", False)
+        if not allow_choch_only and hasattr(candidate, "rejection_reasons"):
+            for r in candidate.rejection_reasons:
+                if "CHoCH only" in r or "trapped" in r or "awaiting BOS" in r:
+                    rejections.append(f"Pre-check failed (Structure): Structure confirmed (BOS after CHoCH) check failed: {r}")
+
         passed = len(rejections) == 0
         return PreTradeCheckResult(
             passed=passed,

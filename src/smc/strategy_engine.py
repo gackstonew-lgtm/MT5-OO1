@@ -17,6 +17,7 @@ from src.smc.mtf_analyzer import MultiTimeframeContext
 from src.smc.market_structure import MarketStructureEngine
 from src.smc.fvg_ob import FvgObEngine
 from src.smc.weekly_daily import InteractionType
+from src.smc.structure_confirmation import StructureStateMachine, ConfirmationState, CycleDirection, StructureStateSnapshot
 
 
 class SmcStrategyEngine:
@@ -24,13 +25,28 @@ class SmcStrategyEngine:
         self,
         min_score: float = 75.0,
         min_rr: float = 2.0,
-        pip_size: float = 0.0001
+        pip_size: float = 0.0001,
+        swing_lookback: int = 5,
+        require_close_break: bool = True,
+        require_lower_high: bool = True,
+        choch_timeout_bars: int = 20,
+        allow_choch_only_entries: bool = True,
+        failed_choch_action: str = "RESET_AND_LOG_TRAP"
     ):
         self.min_score = min_score
         self.min_rr = min_rr
         self.pip_size = pip_size
-        self.struct_engine = MarketStructureEngine(swing_lookback=5)
+        self.allow_choch_only_entries = allow_choch_only_entries
+        self.struct_engine = MarketStructureEngine(swing_lookback=swing_lookback)
         self.fvg_engine = FvgObEngine(min_fvg_pips=1.5, pip_size=pip_size)
+        self.struct_confirmation = StructureStateMachine(
+            swing_lookback=swing_lookback,
+            require_close_break=require_close_break,
+            require_lower_high=require_lower_high,
+            choch_timeout_bars=choch_timeout_bars,
+            allow_choch_only_entries=allow_choch_only_entries,
+            failed_choch_action=failed_choch_action
+        )
 
     def check_scalp_htf_agreement(
         self,
@@ -75,6 +91,9 @@ class SmcStrategyEngine:
         symbol = mtf_ctx.symbol
         last_candle = m15_candles[-1]
         current_price = last_candle.close
+
+        # Update CHoCH-Warning -> BOS-Confirmation State Machine
+        struct_state = self.struct_confirmation.update(symbol, Timeframe.M15, m15_candles)
 
         # Detect M15 structure, FVGs and OBs
         _, m15_events = self.struct_engine.analyze_structure(symbol, Timeframe.M15, m15_candles)
@@ -121,7 +140,8 @@ class SmcStrategyEngine:
                 m15_events=m15_events,
                 active_fvgs=active_bullish_fvgs,
                 active_obs=active_bullish_obs,
-                is_in_killzone=is_in_killzone
+                is_in_killzone=is_in_killzone,
+                struct_state=struct_state
             )
             if candidate:
                 candidates.append(candidate)
@@ -158,7 +178,8 @@ class SmcStrategyEngine:
                 m15_events=m15_events,
                 active_fvgs=active_bearish_fvgs,
                 active_obs=active_bearish_obs,
-                is_in_killzone=is_in_killzone
+                is_in_killzone=is_in_killzone,
+                struct_state=struct_state
             )
             if candidate:
                 candidates.append(candidate)
@@ -175,7 +196,8 @@ class SmcStrategyEngine:
         m15_events: List,
         active_fvgs: List[FairValueGap],
         active_obs: List[OrderBlock],
-        is_in_killzone: bool
+        is_in_killzone: bool,
+        struct_state: Optional[StructureStateSnapshot] = None
     ) -> Optional[SignalCandidate]:
         current_candle = m15_candles[-1]
         entry_price = current_candle.close
@@ -213,6 +235,29 @@ class SmcStrategyEngine:
 
         rr = (target_price - entry_price) / sl_distance
 
+        # Structure Confirmation Gating
+        if struct_state and not self.allow_choch_only_entries:
+            if struct_state.direction == CycleDirection.BULLISH:
+                if struct_state.state == ConfirmationState.CHOCH_WARNING:
+                    rejection_reasons_init = ["CHoCH only, awaiting BOS"]
+                elif struct_state.state == ConfirmationState.PULLBACK:
+                    rejection_reasons_init = ["CHoCH pullback in progress, awaiting BOS"]
+                elif struct_state.state == ConfirmationState.FAILED_TRAP:
+                    rejection_reasons_init = ["CHoCH failed - trapped"]
+                else:
+                    rejection_reasons_init = []
+            else:
+                rejection_reasons_init = []
+        else:
+            rejection_reasons_init = []
+
+        if struct_state and struct_state.state == ConfirmationState.BOS_CONFIRMED and struct_state.direction == CycleDirection.BULLISH:
+            if struct_state.stop_loss_reference > 0:
+                stop_loss = struct_state.stop_loss_reference - sl_buffer
+                sl_distance = entry_price - stop_loss
+                if sl_distance > 0:
+                    rr = (target_price - entry_price) / sl_distance
+
         # Scoring
         score, reasons, rejection_reasons = self._score_setup(
             direction=OrderType.BUY,
@@ -222,8 +267,10 @@ class SmcStrategyEngine:
             best_fvg=best_fvg,
             best_ob=best_ob,
             is_in_killzone=is_in_killzone,
-            rr=rr
+            rr=rr,
+            struct_state=struct_state
         )
+        rejection_reasons.extend(rejection_reasons_init)
 
         status = "APPROVED" if score >= self.min_score and rr >= self.min_rr and not rejection_reasons else "REJECTED"
 
@@ -257,7 +304,8 @@ class SmcStrategyEngine:
         m15_events: List,
         active_fvgs: List[FairValueGap],
         active_obs: List[OrderBlock],
-        is_in_killzone: bool
+        is_in_killzone: bool,
+        struct_state: Optional[StructureStateSnapshot] = None
     ) -> Optional[SignalCandidate]:
         current_candle = m15_candles[-1]
         entry_price = current_candle.close
@@ -292,6 +340,29 @@ class SmcStrategyEngine:
 
         rr = (entry_price - target_price) / sl_distance
 
+        # Structure Confirmation Gating
+        if struct_state and not self.allow_choch_only_entries:
+            if struct_state.direction == CycleDirection.BEARISH:
+                if struct_state.state == ConfirmationState.CHOCH_WARNING:
+                    rejection_reasons_init = ["CHoCH only, awaiting BOS"]
+                elif struct_state.state == ConfirmationState.PULLBACK:
+                    rejection_reasons_init = ["CHoCH pullback in progress, awaiting BOS"]
+                elif struct_state.state == ConfirmationState.FAILED_TRAP:
+                    rejection_reasons_init = ["CHoCH failed - trapped"]
+                else:
+                    rejection_reasons_init = []
+            else:
+                rejection_reasons_init = []
+        else:
+            rejection_reasons_init = []
+
+        if struct_state and struct_state.state == ConfirmationState.BOS_CONFIRMED and struct_state.direction == CycleDirection.BEARISH:
+            if struct_state.stop_loss_reference > 0:
+                stop_loss = struct_state.stop_loss_reference + sl_buffer
+                sl_distance = stop_loss - entry_price
+                if sl_distance > 0:
+                    rr = (entry_price - target_price) / sl_distance
+
         score, reasons, rejection_reasons = self._score_setup(
             direction=OrderType.SELL,
             setup_type=setup_type,
@@ -300,8 +371,10 @@ class SmcStrategyEngine:
             best_fvg=best_fvg,
             best_ob=best_ob,
             is_in_killzone=is_in_killzone,
-            rr=rr
+            rr=rr,
+            struct_state=struct_state
         )
+        rejection_reasons.extend(rejection_reasons_init)
 
         status = "APPROVED" if score >= self.min_score and rr >= self.min_rr and not rejection_reasons else "REJECTED"
 
@@ -334,7 +407,8 @@ class SmcStrategyEngine:
         best_fvg: Optional[FairValueGap],
         best_ob: Optional[OrderBlock],
         is_in_killzone: bool,
-        rr: float
+        rr: float,
+        struct_state: Optional[StructureStateSnapshot] = None
     ) -> Tuple[float, List[str], List[str]]:
         """
         Calculates confluence score (0-100) and checks hard disqualifiers.

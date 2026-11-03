@@ -2,6 +2,43 @@
 
 All notable changes to the Institutional Multi-Timeframe Algorithmic Trading Bot (`MT5-OO1`) are documented in this file.
 
+## [3.2.0] - 2026-11-03
+
+### Added - CHoCH-Warning -> BOS-Confirmation State Machine & Structure Lifecycle
+- **Market Structure Confirmation Module (`src/smc/structure_confirmation.py`)**:
+  - Deterministic state machine tracking `IDLE -> CHOCH_WARNING -> PULLBACK -> BOS_CONFIRMED -> FAILED_TRAP`.
+  - **CHoCH = Warning Only**: Candle close confirmation required (`require_close_break: true`); wick breaks strictly ignored. CHoCH alone cannot trigger trades.
+  - **Pullback & Retracement Validation**: Requires confirmed Lower High (bearish) or Higher Low (bullish) relative to pre-CHoCH extreme before BOS eligibility.
+  - **BOS Confirmation**: Unlocks trade entry only after candle close breaks the post-CHoCH impulse extreme.
+  - **Trap Invalidation**: Closes beyond pre-CHoCH extreme are classified as `FAILED_TRAP`, reset prior trend, and recorded.
+  - **Configurable Timeouts**: Warnings expire back to `IDLE` after `choch_timeout_bars` (default 20).
+- **Strategy Engine Gating (`src/smc/strategy_engine.py`)**:
+  - Gated candidate execution when `allow_choch_only_entries: false`.
+  - Rejections logged at `DECISION` level with clear diagnostics (`"CHoCH only, awaiting BOS"`, `"CHoCH failed - trapped"`).
+  - Stop loss anchored to the confirmed Lower High (shorts) or Higher Low (longs) for structural invalidation protection.
+- **Pre-Trade Checklist Item #11 (`src/execution/order_manager.py`)**:
+  - Validates "Structure confirmed (BOS after CHoCH)" before sending order requests.
+- **Telegram Multi-Tier Notifications (`src/notifications/telegram_service.py`)**:
+  - CHoCH detected $\rightarrow$ `DECISION`/`INFO` (silent digest queue).
+  - BOS confirmed + valid setup $\rightarrow$ `SIGNAL` (immediate loud alert).
+  - Failed CHoCH / Trap $\rightarrow$ `DECISION` (silent digest queue).
+- **MQL5 EA Chart Visuals (`mql5/Experts/PythonBridgeEA.mq5`)**:
+  - Optional inputs to draw CHoCH (dashed line + label) and BOS (solid line + label) on MT5 charts, with failed CHoCH lines rendered in gray (`clrDarkGray`).
+  - Native MetaEditor compilation verified: 0 errors, 0 warnings.
+- **Automated Test Coverage (`tests/test_structure_confirmation.py`)**:
+  - Full synthetic test suite covering bearish/bullish confirmation sequences, trap invalidations, wick-only rejections, and timeout expirations.
+
+## [3.1.0] - 2026-11-03
+
+### Added - Quant Best-Practice Upgrade (Stages 1-3)
+- **Broker Adapter Layer (`src/adapters/`)**:
+  - `BrokerAdapter` abstract interface with `LiveMT5Broker` and `SimBroker`.
+  - High-fidelity simulation mechanics: half-spread + volatility slippage, institutional commissions, margin verification, and SL/TP boundary triggers.
+- **Data & Feature Pipeline (`src/features/`)**:
+  - Zero-lookahead feature extraction: ATR(14), EMA(20, 50, 200), RSI(14), ADX(14), Bollinger Bands, fractal swings, and MTF alignment.
+- **Modular Strategy Plug-in Architecture (`src/strategies/`)**:
+  - `SignalModule`, `FilterModule`, `ExitModule`, and `SizingModule` composable pipeline with `LegacySMCStrategy` adapter.
+
 ## [3.0.0] - 2026-11-02
 
 ### Added - Modern Quantitative Upgrade & Account Adaptation Suite
@@ -48,49 +85,3 @@ All notable changes to the Institutional Multi-Timeframe Algorithmic Trading Bot
 - **Stage 6: Monitoring and Decay Detection (`src/monitoring/`)**:
   - CUSUM strategy decay guard with 3-tier sigma alerts: Warning (2.0s), Reduced Risk (2.5s), Pause (3.0s, requiring operator `/run`).
   - Feature drift detection using Population Stability Index (PSI) and Kolmogorov-Smirnov 2-sample tests over rolling 100 bars.
-  - Deal reconciler auditing MT5 deal history against bot orders for price drift, volume mismatches, and rogue orders.
-  - LLM trade reviewer module generating structured review prompt templates; silent when unconfigured.
-
-- **Stage 7: CI and Repository Hygiene**:
-  - GitHub Actions CI workflow (`.github/workflows/ci.yml`) validating unittests, secret scans, and baseline verification.
-  - Git pre-commit hook preventing commits containing `.env`, tokens, passwords, data caches, or raw reports.
-  - Comprehensive documentation updates across `README.md`, `docs/ARCHITECTURE.md`, `docs/STRATEGY.md`, and `CHANGELOG.md`.
-
-## [2.1.0] - 2026-11-02
-
-### Added
-- **Startup Warm-Up & Self-Inspection Checklist**:
-  - Implemented 7-point validation sequence evaluating IPC socket bridge connectivity, symbol selection, multi-timeframe history depth, broker UTC offset detection, real-time spread/ATR accessibility, account profile & risk caps, and single-instance mutex locks.
-  - Added configurable warmup inputs: `InpWarmupBars` (default 300) and `InpSkipMinutesAfterOpen` (default 5 min).
-  - Enforced closed-bar trade evaluations only on signal timeframe (M15), completely preventing spurious signals on forming candles.
-
-- **Asynchronous History Force-Loading Engine**:
-  - Implemented non-blocking history loading loop with retry backoff (`InpHistoryLoadTimeoutSec = 30`, `InpHistoryRetryWaitMs = 500`).
-  - Added realistic, per-timeframe required bar thresholds: W1 (52 bars), D1 (200 bars), H4 (300 bars), H1 (500 bars), M15 (500 bars).
-  - Computed hard mathematical floor from indicator periods (ATR, ADX, structure levels) to permanently block trading on insufficiently warmed symbols regardless of override settings.
-  - Implemented `InpOnShortHistory` policy modes: `ASK`, `REDUCE`, `BLOCK_SYMBOL`.
-
-- **Continuous Telegram Activity Feed & Digest Engine**:
-  - Structured 6-tier logging hierarchy: `CRITICAL`, `TRADE`, `SIGNAL`, `DECISION`, `INFO`, `DEBUG`.
-  - Configured 10-second batched digest queue (`FeedIntervalSec = 10.0`) with 4096-character auto-splitting and `disable_notification=true` for silent delivery.
-  - Configured immediate, loud push notifications for `CRITICAL`, `TRADE`, and `SIGNAL` events.
-  - Implemented Telegram 429 `retry_after` backoff handling ensuring network delays never block low-latency trade execution.
-  - Added interactive bot commands restricted strictly to authorized `TELEGRAM_CHAT_ID`: `/verbose on|off`, `/level info|debug|decision`, `/feed on|off`, `/mute <min>`, `/last <N>`.
-
-- **Multi-Platform Audio Alerts**:
-  - Native Windows `winsound.Beep` integration in Python bridge and `.wav` audio triggers in MQL5 EA for priority events.
-
-- **Institutional Risk Management & Position Sizing**:
-  - Dynamic lot sizing derived mathematically from structural stop-loss distance, `SYMBOL_TRADE_TICK_VALUE`, `SYMBOL_TRADE_TICK_SIZE`, and `SYMBOL_TRADE_CONTRACT_SIZE`.
-  - Clamped volume to `SYMBOL_VOLUME_MIN`/`MAX` with strict downward rounding to `SYMBOL_VOLUME_STEP` (preventing round-up risk inflation).
-  - Hard trade skip if minimum lot size exceeds `MaxRiskPercentPerTrade` (default 2% of equity/balance).
-  - Unified `OrderCalcProfit` dollar calculations for both stop-loss risk and take-profit gain, including spread and commission estimates.
-  - Strict Reward-to-Risk ratio filter enforcing a minimum 1:2 R:R floor prior to order dispatch.
-  - Dual-layer risk enforcement: Pre-check on Python strategy engine and pre-flight validation on MQL5 EA prior to `OrderSend`.
-
-- **Heartbeat Noise Suppression**:
-  - Throttled market structure scanning heartbeats to 1 digest entry per closed bar evaluation or significant market structure state changes, eliminating tick-level log flooding.
-
-### Security
-- Comprehensive secret sanitization: Cleaned all live bot tokens and account logins from source files and test fixtures.
-- Hardened `.gitignore` and `.env.example` templates covering all environment credentials, logs, and compiled binaries.
