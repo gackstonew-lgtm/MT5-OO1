@@ -1,5 +1,100 @@
 {
+  "enabled": false,
+  "active_profile": "ist_reference",
+  "require_verified_broker_offset": true,
   "broker_utc_offset_hours": 2,
+  "profiles": {
+    "ist_reference": {
+      "description": "Static UTC reference profile from IST hours (UTC+5:30)",
+      "asia": {
+        "start_utc": "00:00",
+        "end_utc": "09:00",
+        "ist_reference": "05:30-14:30 IST",
+        "volatility": "LOW_RANGE",
+        "risk_multiplier": 0.5
+      },
+      "london": {
+        "start_utc": "06:00",
+        "end_utc": "12:00",
+        "ist_reference": "11:30-17:30 IST",
+        "volatility": "HIGH",
+        "risk_multiplier": 1.0
+      },
+      "new_york": {
+        "start_utc": "12:30",
+        "end_utc": "17:30",
+        "ist_reference": "18:00-23:00 IST",
+        "volatility": "HIGH",
+        "risk_multiplier": 1.0
+      },
+      "best_window": {
+        "start_utc": "12:30",
+        "end_utc": "17:30",
+        "ist_reference": "18:00-23:00 IST",
+        "volatility": "HIGHEST",
+        "risk_multiplier": 1.0
+      },
+      "london_ny_overlap": {
+        "start_utc": "12:30",
+        "end_utc": "16:00",
+        "volatility": "HIGHEST",
+        "risk_multiplier": 1.0
+      }
+    },
+    "market_local_dst": {
+      "description": "Dynamic local market hours using zoneinfo (Europe/London, America/New_York)",
+      "asia": {
+        "timezone": "Asia/Tokyo",
+        "local_start": "09:00",
+        "local_end": "18:00",
+        "fallback_utc_start": "00:00",
+        "fallback_utc_end": "09:00",
+        "volatility": "LOW_RANGE",
+        "risk_multiplier": 0.5
+      },
+      "london": {
+        "timezone": "Europe/London",
+        "local_start": "08:00",
+        "local_end": "16:30",
+        "fallback_utc_start": "07:00",
+        "fallback_utc_end": "15:30",
+        "volatility": "HIGH",
+        "risk_multiplier": 1.0
+      },
+      "new_york": {
+        "timezone": "America/New_York",
+        "local_start": "08:00",
+        "local_end": "17:00",
+        "cash_open": "09:30",
+        "fallback_utc_start": "12:00",
+        "fallback_utc_end": "21:00",
+        "volatility": "HIGH",
+        "risk_multiplier": 1.0
+      },
+      "best_window": {
+        "use_overlap": true,
+        "description": "Real London/NY overlap representing deepest liquidity",
+        "volatility": "HIGHEST",
+        "risk_multiplier": 1.0
+      }
+    }
+  },
+  "transitions": {
+    "rollover_blackout": {
+      "enabled": true,
+      "start_utc": "21:55",
+      "end_utc": "22:15"
+    },
+    "monday_open_skip_minutes": 30,
+    "friday_cutoff_utc": "20:00",
+    "handover_cooldown_minutes": 15,
+    "late_session_no_entry_minutes": 20,
+    "cash_open_blackout": {
+      "enabled": true,
+      "minutes_before": 30,
+      "minutes_after": 30
+    }
+  },
   "asian_session": {
     "enabled": true,
     "start_utc": "00:00",

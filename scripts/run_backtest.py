@@ -173,6 +173,7 @@ def run_simulation(
                     "r_multiple": r_mult,
                     "entry_price": trade["entry_price"],
                     "close_price": sl,
+                    "session": trade.get("session", "UNKNOWN"),
                     "entry_time": trade["entry_time"],
                     "close_time": cur_time.isoformat()
                 })
@@ -187,6 +188,7 @@ def run_simulation(
                     "r_multiple": r_mult,
                     "entry_price": trade["entry_price"],
                     "close_price": tp,
+                    "session": trade.get("session", "UNKNOWN"),
                     "entry_time": trade["entry_time"],
                     "close_time": cur_time.isoformat()
                 })
@@ -226,7 +228,8 @@ def run_simulation(
                     "tp": signal.take_profit,
                     "rr": signal.risk_reward,
                     "risk_usd": risk_usd,
-                    "entry_time": cur_time.isoformat()
+                    "entry_time": cur_time.isoformat(),
+                    "session": getattr(signal, "session_name", "UNKNOWN") or "UNKNOWN"
                 })
 
     trapped_count = orchestrator.strategy_engine.struct_confirmation.trapped_events_count

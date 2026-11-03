@@ -40,6 +40,19 @@ class SmcStrategyEngine:
         self.struct_engine = MarketStructureEngine(swing_lookback=swing_lookback)
         self.fvg_engine = FvgObEngine(min_fvg_pips=1.5, pip_size=pip_size)
         self.pattern_adapter = None
+        self.session_liq_engine = None
+        self.session_liq_enabled = False
+        try:
+            import json, os
+            cfg_p = "config/sessions.json"
+            if os.path.exists(cfg_p):
+                with open(cfg_p, "r", encoding="utf-8") as f:
+                    s_cfg = json.load(f)
+                    self.session_liq_enabled = bool(s_cfg.get("enabled", False))
+            from src.smc.session_liquidity import SessionLiquidityEngine
+            self.session_liq_engine = SessionLiquidityEngine(pip_multiplier=1.0 / pip_size if pip_size > 0 else 10000.0)
+        except Exception:
+            pass
         self.struct_confirmation = StructureStateMachine(
             swing_lookback=swing_lookback,
             require_close_break=require_close_break,
@@ -109,6 +122,13 @@ class SmcStrategyEngine:
         # Check for Weekly/Daily interactions
         interaction_types = [res.interaction for res in mtf_ctx.level_interactions]
 
+        # Compute Asia range & check for London Judas sweeps (only when sessions enabled)
+        asia_sweep = None
+        if self.session_liq_engine and self.session_liq_enabled:
+            asia_range = self.session_liq_engine.calculate_asia_range(symbol, m15_candles)
+            if asia_range:
+                asia_sweep = self.session_liq_engine.detect_london_asia_sweep(symbol, m15_candles, asia_range, pip_size=self.pip_size)
+
         # ------------------------------------------------------------------
         # Setup 1: BULLISH OPPORTUNITIES (Reversals & Continuations)
         # ------------------------------------------------------------------
@@ -130,6 +150,9 @@ class SmcStrategyEngine:
         elif mtf_ctx.h4.trend in [TrendBias.STRONG_BULLISH, TrendBias.WEAK_BULLISH]:
             bullish_setup_type = SetupType.M15_SMC_OTE
             related_level = "H4_TREND_ALIGNMENT"
+        elif asia_sweep and asia_sweep.direction_bias == OrderType.BUY:
+            bullish_setup_type = SetupType.SESSION_SWEEP
+            related_level = "ASIA_LOW_SWEEP"
 
         if bullish_setup_type is not None:
             candidate = self._evaluate_bullish_candidate(
@@ -168,6 +191,9 @@ class SmcStrategyEngine:
         elif mtf_ctx.h4.trend in [TrendBias.STRONG_BEARISH, TrendBias.WEAK_BEARISH]:
             bearish_setup_type = SetupType.M15_SMC_OTE
             bear_related_level = "H4_TREND_ALIGNMENT"
+        elif asia_sweep and asia_sweep.direction_bias == OrderType.SELL:
+            bearish_setup_type = SetupType.SESSION_SWEEP
+            bear_related_level = "ASIA_HIGH_SWEEP"
 
         if bearish_setup_type is not None:
             candidate = self._evaluate_bearish_candidate(

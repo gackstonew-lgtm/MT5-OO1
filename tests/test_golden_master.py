@@ -18,6 +18,7 @@ import contextlib
 import unittest
 from pathlib import Path
 from datetime import datetime, timezone
+from unittest.mock import patch
 from typing import Dict, List, Any
 
 # Ensure project root in sys.path
@@ -99,70 +100,79 @@ class TestGoldenMaster(unittest.TestCase):
 
         total_checked = 0
 
-        for sym in symbols:
-            expected_decisions = self.canonical_data["decisions"][sym]
-            m15_all = self._load_candles(sym, "M15")
-            h1_all = self._load_candles(sym, "H1")
-            h4_all = self._load_candles(sym, "H4")
-            d1_all = self._load_candles(sym, "D1")
-            w1_all = self._load_candles(sym, "W1")
+        recorded_at_str = self.canonical_data.get("metadata", {}).get("recorded_at", "2026-11-03T10:35:56.529262+00:00")
+        frozen_dt = datetime.fromisoformat(recorded_at_str)
 
-            start_idx = len(m15_all) - total_bars
-            eval_m15 = m15_all[start_idx:]
+        class ReplayDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen_dt if tz else frozen_dt.replace(tzinfo=None)
 
-            h1_times = [c.time for c in h1_all]
-            h4_times = [c.time for c in h4_all]
-            d1_times = [c.time for c in d1_all]
-            w1_times = [c.time for c in w1_all]
+        with patch("src.core.orchestrator.datetime", ReplayDatetime):
+            for sym in symbols:
+                expected_decisions = self.canonical_data["decisions"][sym]
+                m15_all = self._load_candles(sym, "M15")
+                h1_all = self._load_candles(sym, "H1")
+                h4_all = self._load_candles(sym, "H4")
+                d1_all = self._load_candles(sym, "D1")
+                w1_all = self._load_candles(sym, "W1")
 
-            for step, current_bar in enumerate(eval_m15):
-                current_time = current_bar.time
-                cur_idx_m15 = start_idx + step + 1
+                start_idx = len(m15_all) - total_bars
+                eval_m15 = m15_all[start_idx:]
 
-                m15_window = m15_all[max(0, cur_idx_m15 - 300):cur_idx_m15]
+                h1_times = [c.time for c in h1_all]
+                h4_times = [c.time for c in h4_all]
+                d1_times = [c.time for c in d1_all]
+                w1_times = [c.time for c in w1_all]
 
-                idx_h1 = bisect.bisect_right(h1_times, current_time)
-                idx_h4 = bisect.bisect_right(h4_times, current_time)
-                idx_d1 = bisect.bisect_right(d1_times, current_time)
-                idx_w1 = bisect.bisect_right(w1_times, current_time)
+                for step, current_bar in enumerate(eval_m15):
+                    current_time = current_bar.time
+                    cur_idx_m15 = start_idx + step + 1
 
-                h1_window = h1_all[max(0, idx_h1 - 60):idx_h1]
-                h4_window = h4_all[max(0, idx_h4 - 30):idx_h4]
-                d1_window = d1_all[max(0, idx_d1 - 20):idx_d1]
-                w1_window = w1_all[max(0, idx_w1 - 10):idx_w1]
+                    m15_window = m15_all[max(0, cur_idx_m15 - 300):cur_idx_m15]
 
-                orchestrator.market_data.set_candles(sym, Timeframe.M15, m15_window)
-                orchestrator.market_data.set_candles(sym, Timeframe.H1, h1_window)
-                orchestrator.market_data.set_candles(sym, Timeframe.H4, h4_window)
-                orchestrator.market_data.set_candles(sym, Timeframe.D1, d1_window)
-                orchestrator.market_data.set_candles(sym, Timeframe.W1, w1_window)
+                    idx_h1 = bisect.bisect_right(h1_times, current_time)
+                    idx_h4 = bisect.bisect_right(h4_times, current_time)
+                    idx_d1 = bisect.bisect_right(d1_times, current_time)
+                    idx_w1 = bisect.bisect_right(w1_times, current_time)
 
-                with contextlib.redirect_stdout(io.StringIO()):
-                    signal = orchestrator.run_cycle_for_symbol(sym)
-                outcome = orchestrator.last_decision_outcomes.get(sym)
+                    h1_window = h1_all[max(0, idx_h1 - 60):idx_h1]
+                    h4_window = h4_all[max(0, idx_h4 - 30):idx_h4]
+                    d1_window = d1_all[max(0, idx_d1 - 20):idx_d1]
+                    w1_window = w1_all[max(0, idx_w1 - 10):idx_w1]
 
-                expected = expected_decisions[step]
+                    orchestrator.market_data.set_candles(sym, Timeframe.M15, m15_window)
+                    orchestrator.market_data.set_candles(sym, Timeframe.H1, h1_window)
+                    orchestrator.market_data.set_candles(sym, Timeframe.H4, h4_window)
+                    orchestrator.market_data.set_candles(sym, Timeframe.D1, d1_window)
+                    orchestrator.market_data.set_candles(sym, Timeframe.W1, w1_window)
 
-                # Assert exact parity
-                actual_outcome_type = outcome.outcome_type.value if outcome else "NONE"
-                self.assertEqual(
-                    actual_outcome_type, expected["outcome_type"],
-                    f"Mismatch at step {step} for {sym} at {current_time}: expected outcome {expected['outcome_type']}, got {actual_outcome_type}"
-                )
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        signal = orchestrator.run_cycle_for_symbol(sym)
+                    outcome = orchestrator.last_decision_outcomes.get(sym)
 
-                actual_reason = outcome.reason_code if outcome else ""
-                self.assertEqual(
-                    actual_reason, expected["reason_code"],
-                    f"Mismatch in reason_code at step {step} for {sym} at {current_time}: expected {expected['reason_code']}, got {actual_reason}"
-                )
+                    expected = expected_decisions[step]
 
-                actual_has_signal = signal is not None
-                self.assertEqual(
-                    actual_has_signal, expected["has_signal"],
-                    f"Mismatch in has_signal at step {step} for {sym} at {current_time}"
-                )
+                    # Assert exact parity
+                    actual_outcome_type = outcome.outcome_type.value if outcome else "NONE"
+                    self.assertEqual(
+                        actual_outcome_type, expected["outcome_type"],
+                        f"Mismatch at step {step} for {sym} at {current_time}: expected outcome {expected['outcome_type']}, got {actual_outcome_type}"
+                    )
 
-                total_checked += 1
+                    actual_reason = outcome.reason_code if outcome else ""
+                    self.assertEqual(
+                        actual_reason, expected["reason_code"],
+                        f"Mismatch in reason_code at step {step} for {sym} at {current_time}: expected {expected['reason_code']}, got {actual_reason}"
+                    )
+
+                    actual_has_signal = signal is not None
+                    self.assertEqual(
+                        actual_has_signal, expected["has_signal"],
+                        f"Mismatch in has_signal at step {step} for {sym} at {current_time}"
+                    )
+
+                    total_checked += 1
 
         self.assertEqual(total_checked, len(symbols) * total_bars)
         print(f"\n[GoldenMaster] Verified {total_checked} closed-bar decisions across {len(symbols)} symbols: 100% BIT-FOR-BIT IDENTICAL")

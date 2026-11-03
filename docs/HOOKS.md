@@ -43,3 +43,24 @@ This document lists every explicit hook point into existing code. In accordance 
 - **Purpose**: Renders `PBE_` structure objects and parses extended visualization commands.
 - **Defaults**: All new inputs default to `false`. Existing `.set` files and chart parameters maintain exact compatibility.
 - **Risk Assessment**: LOW. Verified with MetaEditor64 real compiler (target 0 errors, 0 warnings).
+
+### Hook 6: Pattern Engine Integration Hook
+- **Target File**: `src/smc/strategy_engine.py`
+- **Location**: `SmcStrategyEngine.scan_for_opportunities()`
+- **Purpose**: When `config/patterns_config.json` has `"enabled": true`, scans for pattern confluence and creates `PATTERN_CONFLUENCE` setups.
+- **Defaults**: `"enabled": false`. With switch off, returns None and preserves original SMC setups.
+- **Risk Assessment**: ZERO. Verified via Golden Master 8,640 replay test.
+
+### Hook 7: Session Layer Pre-Trade Checklist Gates
+- **Target File**: `src/execution/order_manager.py`
+- **Location**: `OrderManager.run_pre_trade_checklist()`
+- **Purpose**: When `config/sessions.json` has `"enabled": true`, evaluates Checklist items #13 (Session active), #14 (Affinity check), #15 (Handover/rollover/cash-open blackout), and #16 (Session trade/loss budgets).
+- **Defaults**: `"enabled": false`. When false, items #13–#16 are bypassed and 100% legacy pre-check decisions are preserved.
+- **Risk Assessment**: ZERO. Verified via Golden Master 8,640 replay test.
+
+### Hook 8: Session Telegram Commands
+- **Target File**: `src/notifications/telegram_service.py`
+- **Location**: Command dispatcher loop
+- **Purpose**: Adds handling for `/session`, `/sessionstats`, `/sessionmode`, and `/sessionprofile`.
+- **Defaults**: Non-destructive command additions.
+- **Risk Assessment**: ZERO.

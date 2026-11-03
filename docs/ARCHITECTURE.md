@@ -113,3 +113,24 @@ flowchart TD
 4. **Context Scorer & Confluence Engine (`src/patterns/context.py`)**: 0-100 rubric synthesizing Order Block/FVG proximity, HTF trend alignment, BOS confirmation state, confirmation candle close, volume expansion, and killzone regime. Incorporates automatic overlap de-duplication and opposing signal conflict resolution.
 5. **Strategy & Execution Hook (`src/patterns/integration.py`, `src/smc/strategy_engine.py`)**: Strangler adapter delivering `PATTERN_CONFLUENCE` setups to the execution pipeline without modifying existing signatures, with master switch off by default.
 6. **Empirical Evaluation Pipeline (`scripts/evaluate_patterns.py`)**: Multi-regime walk-forward splits reporting sample size, win rate, expectancy, profit factor, and max drawdown with transaction costs.
+
+### Stage 9: Session-Aware Trading Architecture & Affinity Matrix (v3.5 Upgrade)
+1. **Dual Session Engine (`src/core/sessions.py`, `config/sessions.json`)**:
+   - Named profile `ist_reference`: Static UTC windows derived from IST reference hours (Asia 00:00–09:00 UTC, London 06:00–12:00 UTC, New York 12:30–17:30 UTC, Best Window 12:30–17:30 UTC).
+   - Named profile `market_local_dst`: Dynamic local market hours using deterministic rules and `zoneinfo` (`Europe/London`, `America/New_York`) adapting automatically to DST shifts.
+   - Comprehensive overlap detection (London/NY overlap) and fail-safe broker offset verification.
+   - Transition protections: Monday open skip (30m), Friday cutoff (20:00 UTC), handover cooldown (15m), and swap rollover blackout (21:55–22:15 UTC).
+2. **Session × Symbol Affinity Engine (`src/core/session_affinity.py`, `config/session_affinity.json`)**:
+   - Normalized symbol alias resolution mapping broker symbols (`EURUSD.m`, `GOLD`, `USTEC.m`) to canonical assets.
+   - Dual gating modes: `scored` (continuous confluence multiplier with minimum weight floor) vs `strict` (binary gate requiring weight $\ge 0.80$).
+   - Cash-open blackout protection for equity indices (`NAS100`, `US30`) 30 minutes before and after 14:30 UTC cash open.
+3. **Session Liquidity Engine (`src/smc/session_liquidity.py`)**:
+   - Computes daily Asian range (High, Low, Midpoint, Range pips) and registers BSL/SSL liquidity zones.
+   - London Judas Swing detection: Sweeps of Asia range followed by closed candle rejection inside the range.
+4. **Session Risk & Correlation Guard (`src/risk/session_risk.py`, `src/execution/order_manager.py`)**:
+   - Per-session trade count ceiling (max 2), consecutive loss cap (max 2), session loss budget (1.0% balance), and session risk multipliers (0.5x Asia, 1.0x London/NY).
+   - Cross-pair correlation guard preventing duplicate same-direction risk in correlated clusters (e.g. `EURUSD` + `GBPUSD`).
+   - Pre-trade checklist gates #13–#16 seamlessly integrated into the 16-point execution checklist.
+5. **Interactive Telegram Controls & Walk-Forward Evaluator (`src/notifications/telegram_service.py`, `scripts/evaluate_sessions.py`)**:
+   - Telegram commands: `/session`, `/sessionstats`, `/sessionmode`, `/sessionprofile`.
+   - Walk-forward multi-regime simulation comparing Baseline vs Scored vs Strict, exporting to `reports/session_performance.json` and feeding `ChampionChallengerEngine`.

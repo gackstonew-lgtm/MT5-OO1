@@ -49,6 +49,18 @@ class OrderManager:
         self.replay_gate = MonteCarloReplayGate(enabled=getattr(self.config.risk, "enable_replay_gate", False))
         self.telegram_cmd_handler: Optional[Any] = None
         self.shadow_journal: Optional[Any] = None
+        self.session_engine = None
+        self.affinity_engine = None
+        self.session_risk = None
+        try:
+            from src.core.sessions import TradingSessionEngine
+            from src.core.session_affinity import SessionAffinityEngine
+            from src.risk.session_risk import SessionRiskEngine
+            self.session_engine = TradingSessionEngine(self.config.session)
+            self.affinity_engine = SessionAffinityEngine()
+            self.session_risk = SessionRiskEngine()
+        except Exception:
+            pass
 
     def run_pre_trade_checklist(
         self,
@@ -174,6 +186,55 @@ class OrderManager:
             if not replay_res.passed:
                 rejections.append(f"Pre-check failed (Replay Gate): {replay_res.rejection_reason}")
 
+        # 13-16. Session-Aware Pre-Trade Checklist Items
+        session_enabled = False
+        sess_info = None
+        if self.session_engine and hasattr(self.session_engine, "_raw_cfg"):
+            session_enabled = bool(self.session_engine._raw_cfg.get("enabled", True))
+
+        if session_enabled and self.session_engine and self.affinity_engine and self.session_risk:
+            from src.core.contracts import SessionType
+            broker_offset_ok = getattr(self.bridge, "broker_utc_offset", 0) != 0 or not self.session_engine.require_verified_offset
+            if self.config.execution_mode in (ExecutionMode.BACKTEST, ExecutionMode.SIMULATION):
+                broker_offset_ok = True
+
+            sess_dt = candidate.timestamp if candidate.timestamp else datetime.now(timezone.utc)
+            sess_info = self.session_engine.get_session_info(
+                current_dt=sess_dt,
+                broker_offset_verified=broker_offset_ok
+            )
+
+            # Checklist Item #13: Session active
+            if sess_info.primary_session in (SessionType.OFF_HOURS, SessionType.WEEKEND):
+                rejections.append(f"Pre-check failed (Session active): Market session is not active ({sess_info.primary_session.value})")
+
+            # Checklist Item #14: Symbol allowed for session (Affinity check)
+            allowed_aff, aff_weight, aff_reason = self.affinity_engine.is_symbol_allowed(
+                session=sess_info.primary_session,
+                raw_symbol=candidate.symbol,
+                dt_utc=sess_dt
+            )
+            if not allowed_aff:
+                rejections.append(f"Pre-check failed (Symbol allowed for session): {aff_reason}")
+
+            # Checklist Item #15: Not in handover/rollover/blackout
+            if sess_info.is_rollover_blackout:
+                rejections.append("Pre-check failed (Not in handover/rollover/blackout): Daily swap rollover blackout active")
+            elif sess_info.is_handover_cooldown:
+                rejections.append(f"Pre-check failed (Not in handover/rollover/blackout): {sess_info.rejection_reason}")
+            elif not sess_info.can_trade and sess_info.rejection_reason:
+                rejections.append(f"Pre-check failed (Not in handover/rollover/blackout): {sess_info.rejection_reason}")
+
+            # Checklist Item #16: Session trade and loss caps OK
+            allowed_risk, s_mult, s_reason = self.session_risk.evaluate_session_risk_permission(
+                candidate=candidate,
+                active_session=sess_info.primary_session,
+                account=account,
+                active_positions=active_positions
+            )
+            if not allowed_risk:
+                rejections.append(f"Pre-check failed (Session trade and loss caps OK): {s_reason}")
+
         passed = len(rejections) == 0
 
         structure_state_str = "BOS_CONFIRMED"
@@ -197,8 +258,11 @@ class OrderManager:
             risk_percent=size_result.risk_percent_actual if passed else 0.0,
             reward_to_risk=candidate.risk_reward,
             structure_state=structure_state_str,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
+            session_name=sess_info.primary_session.value if sess_info else None
         )
+        if sess_info:
+            candidate.session_name = sess_info.primary_session.value
         candidate.trade_plan = plan
         self._signal_trade_plans[candidate.id] = plan
 

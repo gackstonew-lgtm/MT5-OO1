@@ -1032,6 +1032,14 @@ class TelegramCommandHandler:
             self._handle_pattern(text)
         elif cmd == "patternstats":
             self._handle_patternstats()
+        elif cmd == "session":
+            self._handle_session(text)
+        elif cmd == "sessionstats":
+            self._handle_sessionstats()
+        elif cmd == "sessionmode":
+            self._handle_sessionmode(text)
+        elif cmd == "sessionprofile":
+            self._handle_sessionprofile(text)
         elif cmd == "killswitch":
             self._handle_killswitch_request()
         else:
@@ -1622,6 +1630,120 @@ class TelegramCommandHandler:
             self._reply("\n".join(lines))
         except Exception as e:
             self._reply(f"❌ Error reading pattern stats: {e}")
+
+    def _handle_session(self, text: str) -> None:
+        parts = text.split()
+        cfg_path = "config/sessions.json"
+        if len(parts) > 1 and parts[1].lower() in ("on", "off", "enable", "disable"):
+            action = parts[1].lower() in ("on", "enable")
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                cfg["enabled"] = action
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+                st = "ENABLED" if action else "DISABLED"
+                self._reply(f"⏱️ Session Filter & Gating is now <b>{st}</b>.")
+                return
+            except Exception as e:
+                self._reply(f"❌ Error updating session config: {e}")
+                return
+
+        try:
+            from src.core.sessions import TradingSessionEngine
+            from src.core.session_affinity import SessionAffinityEngine
+            engine = TradingSessionEngine()
+            affinity = SessionAffinityEngine()
+            info = engine.get_session_info()
+
+            best_mark = "🌟 <b>ACTIVE</b>" if info.is_best_window else "▫️ Inactive"
+            st_enabled = "ENABLED" if engine._raw_cfg.get("enabled", True) else "DISABLED"
+
+            allowed_syms = []
+            for s in ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "AUDUSD", "NZDUSD", "USDCAD", "NAS100", "US30", "BTCUSD"]:
+                ok, w, _ = affinity.is_symbol_allowed(info.primary_session, s)
+                if ok and w >= 0.5:
+                    allowed_syms.append(f"{s} ({w:.1f})")
+
+            msg = (
+                f"⏱️ <b>SESSION STATUS & LIQUIDITY WINDOW</b>\n\n"
+                f"• <b>Status:</b> <code>{st_enabled}</code>\n"
+                f"• <b>Active Profile:</b> <code>{info.active_profile}</code>\n"
+                f"• <b>Primary Session:</b> <code>{info.primary_session.value}</code>\n"
+                f"• <b>Active Sessions:</b> <code>{', '.join(s.value for s in info.active_sessions)}</code>\n"
+                f"• <b>Best Window (Peak Liquidity):</b> {best_mark}\n"
+                f"• <b>Time in Session:</b> <code>{info.time_in_session_minutes:.0f} mins</code>\n"
+                f"• <b>Time to Close:</b> <code>{info.time_to_close_minutes:.0f} mins</code>\n"
+                f"• <b>Trading Allowed:</b> <code>{'YES' if info.can_trade else 'NO'}</code>"
+                + (f" (<i>{info.rejection_reason}</i>)" if not info.can_trade and info.rejection_reason else "") + "\n\n"
+                f"🎯 <b>Top Affinity Symbols for Session:</b>\n"
+                f"<code>{', '.join(allowed_syms) if allowed_syms else 'None (Off-Hours)'}</code>\n\n"
+                f"⚙️ <i>Controls: /session on|off, /sessionmode strict|scored, /sessionprofile &lt;name&gt;</i>"
+            )
+            self._reply(msg)
+        except Exception as e:
+            self._reply(f"❌ Error evaluating session: {e}")
+
+    def _handle_sessionstats(self) -> None:
+        rep_path = "reports/session_performance.json"
+        if not os.path.exists(rep_path):
+            self._reply("📊 No session performance data available. Run <code>python scripts/evaluate_sessions.py</code> first.")
+            return
+
+        try:
+            with open(rep_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            sessions = data.get("sessions", {})
+            if not sessions:
+                self._reply("📊 No session metrics found in report.")
+                return
+
+            lines = ["📊 <b>PER-SESSION PERFORMANCE & EXPECTANCY</b>\n"]
+            for sess_name, stats in sessions.items():
+                lines.append(
+                    f"⏱️ <b>{escape_html(sess_name)}</b>:\n"
+                    f"  • Trades: <code>{stats.get('sample_size', 0)}</code> | Win%: <code>{stats.get('win_rate_pct', 0.0)}%</code>\n"
+                    f"  • Avg R: <code>{stats.get('avg_r', 0.0):.2f}</code> | Exp: <code>{stats.get('expectancy_r', 0.0):.2f}R</code>\n"
+                    f"  • Profit Factor: <code>{stats.get('profit_factor', 0.0):.2f}</code> | Max DD: <code>{stats.get('max_dd_r', 0.0):.2f}R</code>"
+                )
+            self._reply("\n".join(lines))
+        except Exception as e:
+            self._reply(f"❌ Error reading session stats: {e}")
+
+    def _handle_sessionmode(self, text: str) -> None:
+        parts = text.split()
+        if len(parts) < 2:
+            self._reply("Usage: <code>/sessionmode strict|scored</code>")
+            return
+
+        mode_choice = parts[1].lower()
+        try:
+            from src.core.session_affinity import SessionAffinityEngine
+            affinity = SessionAffinityEngine()
+            if affinity.set_mode(mode_choice):
+                self._reply(f"✅ Session affinity mode set to <b>{mode_choice.upper()}</b>.")
+            else:
+                self._reply("Usage: <code>/sessionmode strict|scored</code>")
+        except Exception as e:
+            self._reply(f"❌ Error setting session mode: {e}")
+
+    def _handle_sessionprofile(self, text: str) -> None:
+        parts = text.split()
+        if len(parts) < 2:
+            self._reply("Usage: <code>/sessionprofile ist_reference|market_local_dst</code>")
+            return
+
+        profile_choice = parts[1].lower()
+        try:
+            from src.core.sessions import TradingSessionEngine
+            engine = TradingSessionEngine()
+            if engine.set_active_profile(profile_choice):
+                self._reply(f"✅ Session active profile set to <b>{profile_choice}</b>.")
+            else:
+                self._reply("Usage: <code>/sessionprofile ist_reference|market_local_dst</code>")
+        except Exception as e:
+            self._reply(f"❌ Error setting session profile: {e}")
 
     def request_trade_confirmation(self, plan: Any, timeout_sec: int = 120) -> bool:
         """

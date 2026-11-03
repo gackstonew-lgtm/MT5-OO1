@@ -1,0 +1,366 @@
+{
+  "timestamp": "2026-11-03T13:13:10.903423+00:00",
+  "days_evaluated": 15,
+  "modes_comparison": {
+    "baseline": {
+      "sample_size": 3241,
+      "win_rate_pct": 8.5,
+      "avg_r": -0.75,
+      "expectancy_r": -0.75,
+      "profit_factor": 0.18,
+      "max_dd_r": 2422.32,
+      "sessions": {
+        "LONDON_NY_OVERLAP": {
+          "sample_size": 427,
+          "win_rate_pct": 8.9,
+          "avg_r": -0.74,
+          "expectancy_r": -0.74,
+          "profit_factor": 0.19,
+          "max_dd_r": 325.17
+        },
+        "LONDON": {
+          "sample_size": 478,
+          "win_rate_pct": 10.5,
+          "avg_r": -0.69,
+          "expectancy_r": -0.69,
+          "profit_factor": 0.23,
+          "max_dd_r": 347.67
+        },
+        "ROLLOVER_BLACKOUT": {
+          "sample_size": 47,
+          "win_rate_pct": 6.4,
+          "avg_r": -0.81,
+          "expectancy_r": -0.81,
+          "profit_factor": 0.13,
+          "max_dd_r": 39.0
+        },
+        "OFF_HOURS": {
+          "sample_size": 751,
+          "win_rate_pct": 5.6,
+          "avg_r": -0.83,
+          "expectancy_r": -0.83,
+          "profit_factor": 0.12,
+          "max_dd_r": 626.0
+        },
+        "ASIAN": {
+          "sample_size": 747,
+          "win_rate_pct": 14.6,
+          "avg_r": -0.57,
+          "expectancy_r": -0.57,
+          "profit_factor": 0.33,
+          "max_dd_r": 427.56
+        },
+        "BEST_WINDOW": {
+          "sample_size": 693,
+          "win_rate_pct": 4.5,
+          "avg_r": -0.87,
+          "expectancy_r": -0.87,
+          "profit_factor": 0.09,
+          "max_dd_r": 599.55
+        },
+        "WEEKEND": {
+          "sample_size": 98,
+          "win_rate_pct": 3.1,
+          "avg_r": -0.91,
+          "expectancy_r": -0.91,
+          "profit_factor": 0.06,
+          "max_dd_r": 89.0
+        }
+      },
+      "symbols": {
+        "NAS100.m": {
+          "sample_size": 529,
+          "win_rate_pct": 7.0,
+          "avg_r": -0.79,
+          "expectancy_r": -0.79,
+          "profit_factor": 0.15
+        },
+        "EURUSD.m": {
+          "sample_size": 567,
+          "win_rate_pct": 16.2,
+          "avg_r": -0.52,
+          "expectancy_r": -0.52,
+          "profit_factor": 0.38
+        },
+        "AUDUSD.m": {
+          "sample_size": 526,
+          "win_rate_pct": 8.6,
+          "avg_r": -0.75,
+          "expectancy_r": -0.75,
+          "profit_factor": 0.18
+        },
+        "XAUUSD.m": {
+          "sample_size": 557,
+          "win_rate_pct": 7.2,
+          "avg_r": -0.78,
+          "expectancy_r": -0.78,
+          "profit_factor": 0.15
+        },
+        "USDJPY.m": {
+          "sample_size": 537,
+          "win_rate_pct": 3.2,
+          "avg_r": -0.91,
+          "expectancy_r": -0.91,
+          "profit_factor": 0.07
+        },
+        "GBPUSD.m": {
+          "sample_size": 525,
+          "win_rate_pct": 8.6,
+          "avg_r": -0.75,
+          "expectancy_r": -0.75,
+          "profit_factor": 0.18
+        }
+      }
+    },
+    "scored": {
+      "sample_size": 2189,
+      "win_rate_pct": 9.5,
+      "avg_r": -0.72,
+      "expectancy_r": -0.72,
+      "profit_factor": 0.21,
+      "max_dd_r": 1571.89,
+      "sessions": {
+        "ASIAN": {
+          "sample_size": 624,
+          "win_rate_pct": 14.3,
+          "avg_r": -0.58,
+          "expectancy_r": -0.58,
+          "profit_factor": 0.32,
+          "max_dd_r": 374.46
+        },
+        "BEST_WINDOW": {
+          "sample_size": 660,
+          "win_rate_pct": 4.7,
+          "avg_r": -0.86,
+          "expectancy_r": -0.86,
+          "profit_factor": 0.1,
+          "max_dd_r": 566.55
+        },
+        "LONDON_NY_OVERLAP": {
+          "sample_size": 427,
+          "win_rate_pct": 8.9,
+          "avg_r": -0.74,
+          "expectancy_r": -0.74,
+          "profit_factor": 0.19,
+          "max_dd_r": 325.17
+        },
+        "LONDON": {
+          "sample_size": 478,
+          "win_rate_pct": 10.5,
+          "avg_r": -0.69,
+          "expectancy_r": -0.69,
+          "profit_factor": 0.23,
+          "max_dd_r": 347.67
+        }
+      },
+      "symbols": {
+        "NAS100.m": {
+          "sample_size": 235,
+          "win_rate_pct": 5.5,
+          "avg_r": -0.83,
+          "expectancy_r": -0.83,
+          "profit_factor": 0.12
+        },
+        "EURUSD.m": {
+          "sample_size": 406,
+          "win_rate_pct": 17.7,
+          "avg_r": -0.48,
+          "expectancy_r": -0.48,
+          "profit_factor": 0.42
+        },
+        "AUDUSD.m": {
+          "sample_size": 367,
+          "win_rate_pct": 11.2,
+          "avg_r": -0.67,
+          "expectancy_r": -0.67,
+          "profit_factor": 0.24
+        },
+        "XAUUSD.m": {
+          "sample_size": 412,
+          "win_rate_pct": 6.8,
+          "avg_r": -0.8,
+          "expectancy_r": -0.8,
+          "profit_factor": 0.15
+        },
+        "USDJPY.m": {
+          "sample_size": 395,
+          "win_rate_pct": 3.8,
+          "avg_r": -0.89,
+          "expectancy_r": -0.89,
+          "profit_factor": 0.08
+        },
+        "GBPUSD.m": {
+          "sample_size": 374,
+          "win_rate_pct": 10.4,
+          "avg_r": -0.69,
+          "expectancy_r": -0.69,
+          "profit_factor": 0.23
+        }
+      }
+    },
+    "strict": {
+      "sample_size": 1421,
+      "win_rate_pct": 10.1,
+      "avg_r": -0.7,
+      "expectancy_r": -0.7,
+      "profit_factor": 0.22,
+      "max_dd_r": 1012.14,
+      "sessions": {
+        "ASIAN": {
+          "sample_size": 252,
+          "win_rate_pct": 16.3,
+          "avg_r": -0.52,
+          "expectancy_r": -0.52,
+          "profit_factor": 0.38,
+          "max_dd_r": 144.18
+        },
+        "BEST_WINDOW": {
+          "sample_size": 559,
+          "win_rate_pct": 5.5,
+          "avg_r": -0.83,
+          "expectancy_r": -0.83,
+          "profit_factor": 0.12,
+          "max_dd_r": 465.55
+        },
+        "LONDON_NY_OVERLAP": {
+          "sample_size": 361,
+          "win_rate_pct": 8.6,
+          "avg_r": -0.75,
+          "expectancy_r": -0.75,
+          "profit_factor": 0.18,
+          "max_dd_r": 279.7
+        },
+        "LONDON": {
+          "sample_size": 249,
+          "win_rate_pct": 16.1,
+          "avg_r": -0.52,
+          "expectancy_r": -0.52,
+          "profit_factor": 0.38,
+          "max_dd_r": 149.67
+        }
+      },
+      "symbols": {
+        "NAS100.m": {
+          "sample_size": 161,
+          "win_rate_pct": 4.3,
+          "avg_r": -0.87,
+          "expectancy_r": -0.87,
+          "profit_factor": 0.09
+        },
+        "EURUSD.m": {
+          "sample_size": 289,
+          "win_rate_pct": 20.4,
+          "avg_r": -0.39,
+          "expectancy_r": -0.39,
+          "profit_factor": 0.5
+        },
+        "AUDUSD.m": {
+          "sample_size": 124,
+          "win_rate_pct": 27.4,
+          "avg_r": -0.2,
+          "expectancy_r": -0.2,
+          "profit_factor": 0.73
+        },
+        "XAUUSD.m": {
+          "sample_size": 274,
+          "win_rate_pct": 4.0,
+          "avg_r": -0.88,
+          "expectancy_r": -0.88,
+          "profit_factor": 0.08
+        },
+        "USDJPY.m": {
+          "sample_size": 316,
+          "win_rate_pct": 3.5,
+          "avg_r": -0.9,
+          "expectancy_r": -0.9,
+          "profit_factor": 0.07
+        },
+        "GBPUSD.m": {
+          "sample_size": 257,
+          "win_rate_pct": 8.2,
+          "avg_r": -0.76,
+          "expectancy_r": -0.76,
+          "profit_factor": 0.17
+        }
+      }
+    }
+  },
+  "sessions": {
+    "ASIAN": {
+      "sample_size": 624,
+      "win_rate_pct": 14.3,
+      "avg_r": -0.58,
+      "expectancy_r": -0.58,
+      "profit_factor": 0.32,
+      "max_dd_r": 374.46
+    },
+    "BEST_WINDOW": {
+      "sample_size": 660,
+      "win_rate_pct": 4.7,
+      "avg_r": -0.86,
+      "expectancy_r": -0.86,
+      "profit_factor": 0.1,
+      "max_dd_r": 566.55
+    },
+    "LONDON_NY_OVERLAP": {
+      "sample_size": 427,
+      "win_rate_pct": 8.9,
+      "avg_r": -0.74,
+      "expectancy_r": -0.74,
+      "profit_factor": 0.19,
+      "max_dd_r": 325.17
+    },
+    "LONDON": {
+      "sample_size": 478,
+      "win_rate_pct": 10.5,
+      "avg_r": -0.69,
+      "expectancy_r": -0.69,
+      "profit_factor": 0.23,
+      "max_dd_r": 347.67
+    }
+  },
+  "symbols": {
+    "NAS100.m": {
+      "sample_size": 235,
+      "win_rate_pct": 5.5,
+      "avg_r": -0.83,
+      "expectancy_r": -0.83,
+      "profit_factor": 0.12
+    },
+    "EURUSD.m": {
+      "sample_size": 406,
+      "win_rate_pct": 17.7,
+      "avg_r": -0.48,
+      "expectancy_r": -0.48,
+      "profit_factor": 0.42
+    },
+    "AUDUSD.m": {
+      "sample_size": 367,
+      "win_rate_pct": 11.2,
+      "avg_r": -0.67,
+      "expectancy_r": -0.67,
+      "profit_factor": 0.24
+    },
+    "XAUUSD.m": {
+      "sample_size": 412,
+      "win_rate_pct": 6.8,
+      "avg_r": -0.8,
+      "expectancy_r": -0.8,
+      "profit_factor": 0.15
+    },
+    "USDJPY.m": {
+      "sample_size": 395,
+      "win_rate_pct": 3.8,
+      "avg_r": -0.89,
+      "expectancy_r": -0.89,
+      "profit_factor": 0.08
+    },
+    "GBPUSD.m": {
+      "sample_size": 374,
+      "win_rate_pct": 10.4,
+      "avg_r": -0.69,
+      "expectancy_r": -0.69,
+      "profit_factor": 0.23
+    }
+  }
+}

@@ -65,7 +65,30 @@ class SessionType(str, Enum):
     NEW_YORK = "NEW_YORK"
     LONDON_NY_OVERLAP = "LONDON_NY_OVERLAP"
     NEW_YORK_PM = "NEW_YORK_PM"
+    BEST_WINDOW = "BEST_WINDOW"
+    ROLLOVER_BLACKOUT = "ROLLOVER_BLACKOUT"
+    WEEKEND = "WEEKEND"
+    HANDOVER_COOLDOWN = "HANDOVER_COOLDOWN"
     OFF_HOURS = "OFF_HOURS"
+
+
+@dataclass(frozen=True)
+class ActiveSessionInfo:
+    primary_session: SessionType
+    active_sessions: Tuple[SessionType, ...]
+    is_best_window: bool
+    time_in_session_minutes: float
+    time_to_close_minutes: float
+    is_handover_cooldown: bool
+    is_rollover_blackout: bool
+    is_weekend: bool
+    is_monday_open_skip: bool
+    is_friday_cutoff: bool
+    is_cash_open_blackout: bool
+    active_profile: str
+    broker_offset_verified: bool
+    can_trade: bool
+    rejection_reason: Optional[str] = None
 
 
 class VolatilityRegime(str, Enum):
@@ -131,6 +154,7 @@ class Candle:
     tick_volume: int = 0
     spread: int = 0
     complete: bool = True
+    session_name: Optional[str] = None
 
     @property
     def range(self) -> float:
@@ -378,6 +402,7 @@ class SignalCandidate:
     ob: Optional[OrderBlock] = None
     related_level: Optional[str] = None  # e.g. "PDL_SWEEP", "PWH_BREAKOUT"
     trade_plan: Optional[Any] = None
+    session_name: Optional[str] = None
 
 
 @dataclass
@@ -492,6 +517,7 @@ class TradePlan:
     pattern_name: Optional[str] = None
     pattern_family: Optional[str] = None
     pattern_score: float = 0.0
+    session_name: Optional[str] = None
 
     def with_amendment(self, amendment: PlanAmendment) -> TradePlan:
         """Returns a new immutable TradePlan instance containing the amendment."""
@@ -510,7 +536,8 @@ class TradePlan:
             amendments=self.amendments + (amendment,),
             pattern_name=self.pattern_name,
             pattern_family=self.pattern_family,
-            pattern_score=self.pattern_score
+            pattern_score=self.pattern_score,
+            session_name=self.session_name
         )
 
     def format_log(self) -> str:
