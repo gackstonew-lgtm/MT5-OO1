@@ -73,6 +73,17 @@ class TradingBotOrchestrator:
         else:
             self.broker = None
 
+        # Hook 3: Modular Strategy Pipeline (Strangler Pattern)
+        if getattr(self.config, 'upgrade_enabled', False) and getattr(self.config, 'modular_strategy_enabled', False):
+            from src.strategies.legacy_adapter import create_legacy_smc_pipeline
+            self.strategy_pipeline = create_legacy_smc_pipeline(
+                smc_engine=self.strategy_engine,
+                sizing_engine=self.sizing_engine,
+                require_scalp_htf_agreement=getattr(self.config.strategy, 'scalp_require_htf_agreement', True)
+            )
+        else:
+            self.strategy_pipeline = None
+
         # 5. Learning & Tracking
         self.performance_tracker = PerformanceTracker()
         champion_cand = StrategyCandidate(
