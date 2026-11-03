@@ -179,6 +179,14 @@ class StrategyConfig:
     ote_fib_entry_max: float = 0.79
     ote_fib_invalidation: float = 1.00
     scalp_require_htf_agreement: bool = True  # SCALP requires M15, H1, H4 agreement
+    active_scalp_mode: bool = True            # Active Trading Mode (Part 6)
+    max_trades_per_symbol_per_hour: int = 3
+    max_trades_per_day: int = 10
+    max_concurrent_positions_per_symbol: int = 1
+    max_total_concurrent_positions: int = 3
+    min_entry_distance_atr_mult: float = 1.0
+    loss_cooldown_seconds: float = 900.0
+    safe_margin_level_min_percent: float = 300.0
 
 
 @dataclass

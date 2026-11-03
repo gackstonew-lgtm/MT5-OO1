@@ -1,5 +1,5 @@
 # Stage 1 Quantitative Validation Report
-*Generated: 2026-11-02T08:59:27.843821+00:00 UTC*
+*Generated: 2026-11-03T09:19:06.026951+00:00 UTC*
 
 ## Executive Summary & Strict Verdicts
 - **EURUSD.m**: `edge not demonstrated`
@@ -14,10 +14,10 @@
 - **Total Trades:** 21 (Wins: 6, Losses: 15)
 - **Win Rate:** 28.6%
 - **Profit Factor:** 0.93
-- **Expectancy in R:** -0.042 R (95% CI: [-0.688, +0.604])
+- **Expectancy in R:** -0.042 R (95% CI: [-0.688, +0.605])
 - **Annualized Sharpe:** -0.24
 - **Deflated Sharpe Ratio (DSR):** 0.0075 (Benchmark: 0.0, Trials: 10)
-- **Probability of Backtest Overfitting (PBO):** 28.6%
+- **Probability of Backtest Overfitting (PBO):** 35.7%
 - **Max Drawdown:** 5.20% | **Time Under Water:** 7 bars
 
 ### 2. Purged & Embargoed Walk-Forward Splits

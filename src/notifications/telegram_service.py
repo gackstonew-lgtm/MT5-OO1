@@ -1209,7 +1209,13 @@ class TelegramCommandHandler:
         if self.status_provider:
             st = self.status_provider()
             state = st.get("state", "RUNNING")
-            bridge_conn = "CONNECTED" if st.get("bridge_connected") else "DISCONNECTED"
+            bridge_state = st.get("bridge_state") or ("CONNECTED" if st.get("bridge_connected") else "DISCONNECTED")
+            last_reply_sec = st.get("last_reply_sec_ago")
+            if last_reply_sec is not None and last_reply_sec >= 0:
+                reply_info = f" (last reply {last_reply_sec:.0f}s ago)"
+            else:
+                reply_info = " (no reply yet)"
+            bridge_conn = f"{bridge_state}{reply_info}"
             sym = st.get("symbol", "XAUUSD.m")
             open_count = st.get("open_positions", 0)
             trades_today = st.get("trades_today", 0)

@@ -30,6 +30,8 @@ from src.learning.performance_tracker import PerformanceTracker, TradeRecord
 from src.learning.champion_challenger import ChampionChallengerEngine, StrategyCandidate
 from src.monitoring.dashboard import TradingDashboard, DashboardState
 from src.monitoring.alerts_telegram import TelegramAlertManager
+from src.execution.active_mode import ActiveTradingEngine, ActiveTradingConfig, ProhibitionViolationError
+from concurrent.futures import ThreadPoolExecutor
 
 
 class TradingBotOrchestrator:
@@ -79,6 +81,7 @@ class TradingBotOrchestrator:
 
         # 6. Monitoring & Alerts
         self.dashboard = TradingDashboard(execution_mode=self.config.execution_mode.value)
+        self.active_engine = ActiveTradingEngine()
         self.alerts = TelegramAlertManager(
             bot_token=self.config.telegram_bot_token,
             chat_id=self.config.telegram_chat_id
@@ -266,6 +269,36 @@ class TradingBotOrchestrator:
             self._record_and_dispatch_outcome(outcome)
             return None
 
+        # Active Mode Prohibitions & Frequency Controls (Part 6)
+        if getattr(self.config.strategy, "active_scalp_mode", True) and hasattr(self, "active_engine"):
+            point = symbol_info.point or 0.00001
+            atr_pts = 100.0
+            if m15 and len(m15) >= 14:
+                ranges = [abs(c.high - c.low) / point for c in m15[-14:]]
+                atr_pts = sum(ranges) / len(ranges)
+
+            allowed, prohib_msg = self.active_engine.verify_prohibitions(
+                symbol=symbol,
+                direction=best.direction,
+                candidate_price=best.entry_price,
+                candidate_risk_pct=risk_pct,
+                candidate_lots=check.calculated_volume,
+                atr=atr_pts * point,
+                account=self.account_info,
+                active_positions=active_positions
+            )
+            if not allowed:
+                outcome = DecisionOutcome(
+                    symbol=symbol,
+                    bar_time=bar_time,
+                    outcome_type=DecisionOutcomeType.TRADE_SKIPPED,
+                    reason_code="PROHIBITION_BLOCKED",
+                    details=prohib_msg,
+                    real_numbers={"reason": prohib_msg, "balance": bal}
+                )
+                self._record_and_dispatch_outcome(outcome)
+                return None
+
         # Dry run support
         if getattr(self.config, "dry_run", False):
             outcome = DecisionOutcome(
@@ -310,6 +343,8 @@ class TradingBotOrchestrator:
                 ticket=ticket
             )
             self._record_and_dispatch_outcome(outcome)
+            if hasattr(self, "active_engine"):
+                self.active_engine.record_trade_opened(symbol=order.symbol, lots=order.volume, risk_pct=risk_pct)
             self.alerts.alert_trade_executed(
                 ticket=ticket,
                 symbol=order.symbol,
@@ -364,3 +399,18 @@ class TradingBotOrchestrator:
             perf=perf,
             portfolio_risk_engine=self.portfolio_risk
         )
+
+    def run_cycle_all_symbols(self) -> Dict[str, Optional[SignalCandidate]]:
+        """Scans all enabled symbols in parallel with a concurrency cap (Part 6 #1)."""
+        max_workers = min(len(self.config.symbols), getattr(self.active_engine.config, "max_simultaneous_evaluations", 4))
+        results = {}
+        with ThreadPoolExecutor(max_workers=max(max_workers, 1)) as executor:
+            futures = {executor.submit(self.run_cycle_for_symbol, sym): sym for sym in self.config.symbols}
+            for fut in futures:
+                sym = futures[fut]
+                try:
+                    results[sym] = fut.result()
+                except Exception as e:
+                    print(f"Error evaluating symbol {sym} in parallel cycle: {e}")
+                    results[sym] = None
+        return results
