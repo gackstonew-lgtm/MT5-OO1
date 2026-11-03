@@ -220,34 +220,34 @@ Before any trade setup is evaluated, `PythonBridgeEA` executes a 7-point pre-fli
 
 ---
 
-## 7. Telegram Activity Feed & Commands
+## 7. Structured Telegram Notification Layer & Commands
 
-The Telegram feed operates on an institutional 6-tier logging hierarchy:
-- `CRITICAL`: Immediate push notification with loud alert sound.
-- `TRADE`: Executions, fills, break-even moves, SL/TP modifications. Loud sound.
-- `SIGNAL`: High-probability setups discovered on closed candles. Loud sound.
-- `DECISION`: Trade rejections, filter outcomes (spread/news/hours), R:R calculations.
-- `INFO`: Warm-up progress, bar close scans, status updates.
-- `DEBUG`: Verbose internal metrics and calculation details.
+The bot uses a structured 3-tier notification layer (`src/notifications/`, documented in [`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md)) with 28 typed event payloads and centralized HTML templates (`src/notifications/templates/`):
 
-### Notification Batching & Rate Limiting
-- **Silent Digest Queue:** `INFO` and `DECISION` lines are queued and dispatched every 10 seconds (`FeedIntervalSec = 10`) in batches up to 4096 characters with `disable_notification=true`.
-- **Immediate Dispatch:** `CRITICAL`, `TRADE`, and `SIGNAL` messages bypass the queue and send immediately with audible notification.
-- **Telegram 429 Compliance:** Built-in `retry_after` parser prevents rate-limit penalties and ensures network retries never delay execution.
+- **Tier 1 — `LOUD` (Immediate push with sound)**: `TradeSetup`, `TradeOpened`, `TargetHit`, `StopLossHit`, `OrderRejected`, `ConnectionLost`, `DailyLossLimitHit`, `DrawdownWarning`, `MarginWarning`, `BotStopped`, `UnauthorizedAccess`, and escalated `CRITICAL` alerts.
+- **Tier 2 — `SILENT` (`disable_notification=true`)**: `BreakEvenMoved`, `PartialClosed`, `SessionOpen`, `SessionClose`, `NewsBlackout`, `DailySummary`, `WeeklySummary`, `BotStarted`, `BotPaused`, `BotResumed`, `ConnectionRestored`, `SpreadWarning`, `DailyLossWarning`, `WarmupProgress`, `ConfigChanged`, `HealthOK`.
+- **Tier 3 — `ON_DEMAND` (Logged on disk; never pushed by default)**: Per-bar `NO SETUP`, `SetupSkipped` filter reasons, and raw bar diagnostics (available via `/logs [N]` or `/last [N]`).
 
-### Telegram Remote Commands
-*Commands are strictly restricted to the authorized `TELEGRAM_CHAT_ID` configured in `.env`.*
+### Live Trade Threading, Noise Policy & Security
+- **Live Trade Card & Threading**: Posts `TRADE SETUP`, edits the card in-place with a live timeline as the trade opens, moves to break-even, banks partial TP, and closes, and threads replies via `reply_to_message_id` (with automatic fallback to a new card if `editMessageText` fails).
+- **Single Pinned Status Card & Transition Alerting**: Replaces 5/15-minute heartbeat spam with one Pinned Status Card edited in place + optional hourly `HealthOK` check + state-transition alerts (`OK -> WARNING -> CRITICAL -> RECOVERED`) with cooldowns and repeat merging.
+- **Zero Secrets**: Account numbers are masked (`****0001`), MT5 retcodes are mapped to plain English, and tokens/keys are automatically redacted.
+
+### Telegram Remote Commands & Inline Buttons
+*All commands and inline callback buttons (`Pause`, `Resume`, `Status`, `Positions`, `Close All` two-step confirmation) are strictly restricted to the authorized `TELEGRAM_CHAT_ID` configured in `.env`.*
 
 | Command | Arguments | Description |
 |---|---|---|
-| `/verbose` | `on` \| `off` | Toggles detailed debug logging in the feed. |
-| `/level` | `info` \| `debug` \| `decision` | Sets the event filter threshold for batch digests. |
-| `/feed` | `on` \| `off` | Enables or pauses periodic digest broadcasts. |
-| `/mute` | `<minutes>` | Mutes periodic notifications for $N$ minutes (0 to unmute). |
-| `/last` | `[N]` | Retrieves the last $N$ lines from the log ring buffer (default 20). |
-| `/status` | *(none)* | Displays comprehensive system health, symbol history, and metrics. |
-| `/allowreduced`| `<SYMBOL>` | Authorizes trading on `<SYMBOL>` with reduced history (above hard floor). |
-| `/blocksymbol` | `<SYMBOL>` | Blocks trading logic for `<SYMBOL>`. |
+| `/status` | *(none)* | Clean status card (mode, connection, session, balance, equity, today P&L + R, DD, open positions, fast-mode state) + inline action buttons. |
+| `/positions` | *(none)* | Formatted open positions (entry, SL, TP, floating P&L, risk) with automatic retry and friendly fallback. |
+| `/today` \| `/week` | *(none)* | Daily or weekly performance & risk summary card. |
+| `/health` | *(none)* | Bridge connection, queue depth, `Suppressed Alert Duplicates` counter, quiet hours, and market-watch status. |
+| `/marketwatch` | `on` \| `off` | Toggle optional hourly market-watch digest. |
+| `/quiet` | `<hours>` | Silence non-critical alerts for `<hours>` (`0` to disable). |
+| `/logs` \| `/last` | `[N]` | Show the last $N$ on-demand activity log lines (default 20). |
+| `/preview_alerts` | *(none)* | Sends 1 sample of all 28 structured message types labelled `🧪 [SAMPLE]`. |
+| `/pause` \| `/resume` | *(none)* | Pause or resume automated market scanning and entries. |
+| `/closeall` \| `/flatten` | *(none)* | Close all open positions (`/closeall` requires two-step confirmation). |
 
 ---
 

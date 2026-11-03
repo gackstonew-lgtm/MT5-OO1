@@ -1,0 +1,18 @@
+{
+  "display_timezone_offset_hours": 3.0,
+  "display_timezone_label": "UTC+3",
+  "pin_status_card": true,
+  "running_smoothly_interval_minutes": 60,
+  "running_smoothly_enabled": true,
+  "marketwatch_enabled": false,
+  "marketwatch_interval_minutes": 60,
+  "push_no_setup": false,
+  "push_raw_activity_digests": false,
+  "alert_cooldown_seconds": 600,
+  "escalation_repeat_threshold": 5,
+  "quiet_hours": {
+    "enabled": false,
+    "start_hour_local": 23,
+    "end_hour_local": 6
+  }
+}

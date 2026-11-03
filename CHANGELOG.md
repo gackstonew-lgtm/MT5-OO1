@@ -2,6 +2,24 @@
 
 All notable changes to the Institutional Multi-Timeframe Algorithmic Trading Bot (`MT5-OO1`) are documented in this file.
 
+## [3.7.0] - 2026-11-03
+
+### Added - Structured Telegram Notification Layer & Live Trade Threading (`config/notifications.json`, `docs/NOTIFICATIONS.md`)
+- **28 Typed Notification Events & Centralized HTML Templates (`src/notifications/events.py`, `src/notifications/templates/default_templates.py`)**:
+  - Replaced raw-log Telegram dumps with 28 structured `@dataclass` payloads rendered by `TemplateRenderer` into clean 3–8 line HTML cards (`<code>` values, symbol-digit prices, thousands-separated money, signed `R` multiples, percentages, UTC + configurable local timezone footer `UTC+3`, HTML escaping, and safe 4,096-character splitting).
+  - Plain-English MT5 retcode mapper (`map_retcode_to_plain_english`), account number masking (`****0001`), and automatic secret/token redaction (`sanitize_sensitive_text`).
+- **3-Tier Noise Policy & State-Transition Alerting (`src/notifications/router.py`)**:
+  - `LOUD` (sound on), `SILENT` (`disable_notification=True`), and `ON_DEMAND` (logged to disk for `/logs [N]` and `/last [N]`; never pushed by default).
+  - Removed per-bar `"NO SETUP"` and 5/15-minute heartbeat spam; replaced with a single Pinned Status Card edited in place (`update_pinned_status_card`), optional periodic `HealthOK` ("running smoothly") check, and optional hourly Market-Watch digest (`/marketwatch on|off`).
+  - State-transition alerting (`OK -> WARNING -> CRITICAL -> RECOVERED`) with cooldowns (`600s`), repeat merging (`"occurred N times in 10 min"`), escalation, and quiet hours (`/quiet <hours>`).
+- **Live Trade Card Editing & Reply Threading (`src/notifications/router.py`, `src/notifications/telegram_transport.py`)**:
+  - Posts `TRADE SETUP`, edits the card in-place to append a live timeline (`Opened -> Break-Even -> Partial TP -> Closed`), threads replies via `reply_to_message_id`, sends a separate `LOUD` message on close, and automatically falls back to a new card if `editMessageText` fails or the card was deleted.
+- **Operator Commands, Inline Buttons & Noise-Source Fixes (`src/notifications/telegram_service.py`, `src/execution/bridge_server.py`)**:
+  - Inline keyboard buttons (`Pause`, `Resume`, `Status`, `Positions`, `Close All` two-step confirmation) and commands `/status`, `/positions`, `/today`, `/week`, `/health`, `/marketwatch`, `/quiet`, `/logs`, `/preview_alerts` (sends all 28 sample cards labelled `🧪 [SAMPLE]`), all gated by strict `TELEGRAM_CHAT_ID` verification.
+  - Fixed `"Insufficient M15 candle history (have 0, required 20)"` spam by deduplicating into a single warm-up progress card and one ready card when synchronized.
+  - Fixed `/positions -> Provider unavailable` by wiring `positions_provider`, `balance_provider`, `pause_handler`, `resume_handler`, `closeall_handler`, and `killswitch_handler` in `PersistentBridgeServer.start()` and adding automatic retry + friendly fallback in `_handle_positions`.
+  - Moved `Suppressed Alert Duplicates` counter out of `/status` into `/health`.
+
 ## [3.6.0] - 2026-11-03
 
 ### Added - Fast Mode Low-Latency Scalping Execution Layer (`config/fast_mode.json`)

@@ -68,7 +68,8 @@ class TestTelegramModule(unittest.TestCase):
 
         self.assertIn("TRADING SETUP DETECTED", text)
         self.assertIn("BTCUSD.m", text)
-        self.assertIn("1000000001", text)
+        self.assertIn("****0001", text)
+        self.assertNotIn("1000000001", text)
         self.assertIn("M15 Liquidity Sweep of PDL", text)
 
     def test_command_security_filter(self):

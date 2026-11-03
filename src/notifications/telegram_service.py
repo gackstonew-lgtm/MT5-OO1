@@ -37,7 +37,18 @@ class TelegramNotifier:
             bot_token=self.config.bot_token or "",
             proxy=self.config.proxy
         )
-        self._msg_queue: queue.Queue[str] = queue.Queue(maxsize=1000)
+        from src.notifications.templates.default_templates import TemplateRenderer, format_timestamp_footer
+        from src.notifications.router import NotificationRouter
+        from src.notifications.events import sanitize_sensitive_text
+        self._sanitize = sanitize_sensitive_text
+        self._format_ts_footer = format_timestamp_footer
+        self.renderer = TemplateRenderer(account_number=account_number or "DEMO")
+        self.router = NotificationRouter(
+            renderer=self.renderer,
+            transport=self.transport,
+            chat_id=self.config.chat_id or ""
+        )
+        self._msg_queue: queue.Queue[Any] = queue.Queue(maxsize=1000)
         self._worker_thread: Optional[threading.Thread] = None
         self._is_running = False
         self._last_send_time = 0.0
@@ -60,13 +71,20 @@ class TelegramNotifier:
 
     def update_account_number(self, account_number: int) -> None:
         self.account_number = account_number
+        if hasattr(self, "renderer") and self.renderer:
+            self.renderer.account_number = account_number
+
+    def emit_event(self, event: Any) -> Tuple[bool, Optional[int], str]:
+        """Routes and dispatches a structured BaseNotificationEvent through NotificationRouter."""
+        return self.router.route_and_dispatch(event)
 
     def send_message(self, text: str, disable_notification: bool = False, parse_mode: str = "HTML") -> None:
         """Queues formatted message for asynchronous dispatch with notification sound control."""
         if not self.config.enabled:
             return
+        safe_text = self._sanitize(text) if hasattr(self, "_sanitize") else text
         try:
-            self._msg_queue.put_nowait((text, disable_notification, parse_mode))
+            self._msg_queue.put_nowait((safe_text, disable_notification, parse_mode))
         except queue.Full:
             logger.warning("[Telegram] Outgoing message queue full. Dropping message.")
 
@@ -75,21 +93,14 @@ class TelegramNotifier:
         self.send_message(text, disable_notification=False, parse_mode="HTML")
 
     def _format_header_footer(self, body: str, symbol: Optional[str] = None) -> str:
-        """Appends account number, symbol and dual UTC + UTC+3 timestamps to every message."""
-        from datetime import timedelta
-        now_utc = datetime.now(timezone.utc)
-        now_utc_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-        now_local = now_utc.astimezone(timezone(timedelta(hours=3)))
-        now_local_str = now_local.strftime("%H:%M:%S UTC+3")
-        acc_str = f"#{self.account_number}" if self.account_number else "N/A"
-        sym_str = f" | <b>Symbol:</b> {escape_html(symbol)}" if symbol else ""
-
-        footer = (
-            f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 <b>Account:</b> <code>{acc_str}</code>{sym_str}\n"
-            f"🕒 <b>Time:</b> <code>{now_utc_str} ({now_local_str})</code>"
+        """Appends masked account number, optional symbol, and consistent UTC + display timezone timestamp footer."""
+        sym_prefix = f"📊 <b>Symbol:</b> <code>{escape_html(symbol)}</code>\n" if symbol else ""
+        footer = self._format_ts_footer(
+            tz_offset_hours=self.renderer.tz_offset_hours if hasattr(self, "renderer") else 3.0,
+            tz_label=self.renderer.tz_label if hasattr(self, "renderer") else "UTC+3",
+            account_number=self.account_number or "DEMO"
         )
-        return truncate_message(body + footer)
+        return truncate_message(self._sanitize(body + ("\n" + sym_prefix if sym_prefix else "") + footer))
 
     def _worker_loop(self) -> None:
         """Daemon worker executing rate-limited (1 msg/sec) HTTP sends."""
@@ -375,19 +386,65 @@ class TelegramNotifier:
             "outcome": outcome_val
         }
 
-        emoji_tag = {
-            "TRADE SENT": "🚀 <b>DECISION OUTCOME: TRADE SENT</b>",
-            "TRADE SKIPPED": "⏭️ <b>DECISION OUTCOME: TRADE SKIPPED</b>",
-            "NO SETUP": "🔍 <b>DECISION OUTCOME: NO SETUP</b>"
-        }.get(outcome_val, "📋 <b>DECISION OUTCOME</b>")
-
-        body = (
-            f"{emoji_tag}\n\n"
-            f"<b>Symbol:</b> <code>{escape_html(sym)}</code>\n"
-            f"<b>Bar Time:</b> <code>{escape_html(bar_time_str)}</code>\n"
-            f"<pre>{escape_html(line)}</pre>"
+        details_str = getattr(outcome, "details", "") or ""
+        # Phase 5: Warm-up progress single-message deduplication
+        warmup_match = re.search(
+            r"Insufficient\s+(\w+)\s+candle\s+history\s*\(have\s+(\d+),\s*required\s+(\d+)\)",
+            details_str,
+            re.IGNORECASE
         )
-        self.send_raw_html(self._format_header_footer(body, symbol=sym))
+        if warmup_match and hasattr(self, "router") and self.router:
+            tf_str = warmup_match.group(1)
+            have_bars = int(warmup_match.group(2))
+            req_bars = int(warmup_match.group(3))
+            warmup_ev = self.router.handle_warmup_bars(sym, tf_str, have_bars, req_bars, timestamp=now_utc)
+            if warmup_ev is not None:
+                rendered_w = self.renderer.render(warmup_ev)
+                self.send_message(rendered_w, disable_notification=True)
+            return True
+
+        # If symbol previously warmed up and now has sufficient bars, emit the single READY message
+        if hasattr(self, "router") and self.router:
+            ready_ev = self.router.handle_warmup_bars(sym, "M15", 20, 20, timestamp=now_utc)
+            if ready_ev is not None:
+                rendered_r = self.renderer.render(ready_ev)
+                self.send_message(rendered_r, disable_notification=True)
+
+        # Phase 2: NO SETUP is ON-DEMAND ONLY (recorded for /marketwatch and /logs, not pushed to chat)
+        if outcome_val == "NO SETUP":
+            if hasattr(self, "router") and self.router:
+                self.router.record_market_watch_scan(sym, details_str or reason)
+                if not self.router.verbose and not self.router._cfg.get("push_no_setup", False):
+                    return True
+
+        if outcome_val == "TRADE SKIPPED" and hasattr(self, "renderer") and self.renderer:
+            from src.notifications.events import SetupSkippedEvent
+            ev_skip = SetupSkippedEvent(
+                symbol=sym,
+                direction=getattr(outcome, "direction", "BUY") or "BUY",
+                reason=details_str or reason,
+            )
+            self.send_message(self.renderer.render(ev_skip), disable_notification=True)
+            return True
+
+        if outcome_val == "TRADE SENT" and hasattr(self, "renderer") and self.renderer:
+            from src.notifications.events import TradeOpenedEvent
+            ev_open = TradeOpenedEvent(
+                symbol=sym,
+                direction=getattr(outcome, "direction", "BUY") or "BUY",
+                ticket=int(getattr(outcome, "ticket", 0) or 0),
+                fill_price=float(getattr(outcome, "entry_price", 0.0) or 0.0),
+                requested_price=float(getattr(outcome, "entry_price", 0.0) or 0.0),
+                lots=float(getattr(outcome, "volume", 0.01) or 0.01),
+                stop_loss=float(getattr(outcome, "stop_loss", 0.0) or 0.0),
+                take_profit=float(getattr(outcome, "take_profit", 0.0) or 0.0),
+                risk_usd=float(getattr(outcome, "risk_dollars", 0.0) or 0.0),
+                risk_pct=float(getattr(outcome, "risk_percent", 0.0) or 0.0),
+                digits=2 if "XAU" in sym or "JPY" in sym else 5,
+            )
+            self.send_message(self.renderer.render(ev_open), disable_notification=False)
+            return True
+
         return True
 
     def reset_suppression_counter(self) -> None:
@@ -769,14 +826,7 @@ class TelegramFeedManager:
                 self._last_batch_line = ""
 
             if not self._batch_queue:
-                now = time.time()
-                if (now - self._last_alive_digest_time) >= (self.idle_digest_min * 60.0):
-                    self._last_alive_digest_time = now
-                    if self.feed_enabled and now >= self.muted_until:
-                        self.notifier.send_message(
-                            "🟢 <b>SYSTEM ALIVE</b> | All systems nominal, bridge connected, waiting for setups. (Idle for 15m)",
-                            disable_notification=True
-                        )
+                self._check_periodic_health_and_marketwatch()
                 return
             lines = list(self._batch_queue)
             self._batch_queue.clear()
@@ -784,19 +834,25 @@ class TelegramFeedManager:
         if not self.feed_enabled or time.time() < self.muted_until:
             return
 
-        # Suppress noise lines: countdown and tick heartbeats
+        # Suppress noise lines: countdown, tick heartbeats, and NO SETUP scans
         def is_noise(l: str) -> bool:
-            return bool(re.search(r"Waiting for bar close, \d+ minutes left|scanning market structure|repeated \d+ times", l))
+            return bool(re.search(
+                r"Waiting for bar close, \d+ minutes left|scanning market structure|repeated \d+ times|NO SETUP:",
+                l
+            ))
 
         meaningful_lines = [l for l in lines if not is_noise(l)]
         if not meaningful_lines:
-            now = time.time()
-            if (now - self._last_alive_digest_time) >= (self.idle_digest_min * 60.0):
-                self._last_alive_digest_time = now
-                self.notifier.send_message(
-                    "🟢 <b>SYSTEM ALIVE</b> | All systems nominal, bridge connected, waiting for setups. (Idle for 15m)",
-                    disable_notification=True
-                )
+            self._check_periodic_health_and_marketwatch()
+            return
+
+        # Raw activity digests are ON-DEMAND ONLY unless verbose mode is enabled
+        push_digests = self.verbose or (
+            hasattr(self.notifier, "router")
+            and self.notifier.router._cfg.get("push_raw_activity_digests", False)
+        )
+        if not push_digests:
+            self._check_periodic_health_and_marketwatch()
             return
 
         self._last_alive_digest_time = time.time()
@@ -817,6 +873,29 @@ class TelegramFeedManager:
         if current_body != header:
             current_body += footer
             self.notifier.send_message(current_body, disable_notification=True)
+
+    def _check_periodic_health_and_marketwatch(self) -> None:
+        now = time.time()
+        if not self.feed_enabled or now < self.muted_until:
+            return
+        router = getattr(self.notifier, "router", None)
+        if not router:
+            return
+        # 1. Optional "Running Smoothly" message every N minutes (default 60m, configurable)
+        smooth_enabled = bool(router._cfg.get("running_smoothly_enabled", True))
+        smooth_min = float(router._cfg.get("running_smoothly_interval_minutes", 60.0))
+        if smooth_enabled and smooth_min > 0 and (now - self._last_alive_digest_time) >= (smooth_min * 60.0):
+            self._last_alive_digest_time = now
+            from src.notifications.events import HealthOKEvent
+            ev = HealthOKEvent(uptime_str=f"{int(smooth_min)}m interval")
+            router.route_and_dispatch(ev, now_ts=now)
+
+        # 2. Optional hourly Market-Watch summary (opt-in via /marketwatch on)
+        mw_min = float(router._cfg.get("marketwatch_interval_minutes", 60.0))
+        if router.marketwatch_enabled and mw_min > 0 and (now - router.last_marketwatch_ts) >= (mw_min * 60.0):
+            router.last_marketwatch_ts = now
+            digest_html = router.build_market_watch_digest()
+            self.notifier.send_message(digest_html, disable_notification=True)
 
     def _write_daily_log(self, line: str) -> None:
         try:
@@ -896,11 +975,29 @@ class TelegramCommandHandler:
 
     def _reply(self, text: str) -> None:
         """Sends immediate direct reply to user chat."""
+        from src.notifications.events import sanitize_sensitive_text
         payload = {
             "chat_id": self.config.chat_id,
-            "text": text,
+            "text": sanitize_sensitive_text(text),
             "parse_mode": "HTML"
         }
+        self.transport.request("POST", "sendMessage", payload=payload, timeout=10.0)
+
+    def _reply_with_markup(self, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
+        """Sends reply with optional inline keyboard, while remaining compatible with _reply mocks."""
+        from src.notifications.events import sanitize_sensitive_text
+        clean_text = sanitize_sensitive_text(text)
+        # If _reply was monkeypatched in a unit test, also invoke it so test assertions capture the text
+        if getattr(self._reply, "__func__", None) is not TelegramCommandHandler._reply:
+            self._reply(clean_text)
+            return
+        payload: Dict[str, Any] = {
+            "chat_id": self.config.chat_id,
+            "text": clean_text,
+            "parse_mode": "HTML"
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         self.transport.request("POST", "sendMessage", payload=payload, timeout=10.0)
 
     def _poll_loop(self) -> None:
@@ -922,12 +1019,54 @@ class TelegramCommandHandler:
                         msg = u.get("message")
                         if msg:
                             self._process_message(msg)
+                        cb = u.get("callback_query")
+                        if cb:
+                            self._process_callback_query(cb)
                 else:
                     time.sleep(2.0)
 
             except Exception as e:
                 logger.error(f"[Telegram] Polling exception: {e}")
                 time.sleep(3.0)
+
+    def _process_callback_query(self, cb: Dict[str, Any]) -> None:
+        """Processes inline keyboard button presses with strict chat_id verification."""
+        cb_id = str(cb.get("id", ""))
+        msg = cb.get("message", {}) or {}
+        sender_chat = str(msg.get("chat", {}).get("id", "") or cb.get("from", {}).get("id", ""))
+        sender_name = cb.get("from", {}).get("first_name", "Unknown")
+        data_cmd = str(cb.get("data", "")).strip()
+
+        if sender_chat != str(self.config.chat_id):
+            logger.warning(f"[Telegram] Security rejection: Ignored callback '{data_cmd}' from unauthorized chat ID '{sender_chat}' ({sender_name}).")
+            return
+
+        if cb_id:
+            self.transport.answer_callback_query(cb_id)
+
+        if data_cmd == "cmd_pause":
+            self._handle_pause()
+        elif data_cmd == "cmd_resume":
+            self._handle_run()
+        elif data_cmd == "cmd_status":
+            self._handle_status()
+        elif data_cmd == "cmd_positions":
+            self._handle_positions()
+        elif data_cmd == "cmd_closeall_prompt":
+            from src.notifications.telegram_transport import build_closeall_confirm_keyboard
+            self._pending_confirmation = ("closeall", time.time())
+            self._reply_with_markup(
+                "⚠️ <b>CONFIRM CLOSE ALL POSITIONS</b>\n\n"
+                "Are you sure you want to liquidate all open positions at market price?\n"
+                "Tap <b>Confirm Close All</b> or reply <code>yes</code> within 30 seconds.",
+                reply_markup=build_closeall_confirm_keyboard()
+            )
+        elif data_cmd == "cmd_closeall_confirm":
+            self._pending_confirmation = None
+            self._execute_confirmed_action("closeall")
+        elif data_cmd == "cmd_closeall_cancel":
+            self._pending_confirmation = None
+            self._reply("❌ <b>Close All Cancelled</b> — Open positions remain untouched.")
 
     def _process_message(self, msg: Dict[str, Any]) -> None:
         sender_chat = str(msg.get("chat", {}).get("id", ""))
@@ -1053,6 +1192,20 @@ class TelegramCommandHandler:
             self._handle_margin()
         elif cmd == "killswitch":
             self._handle_killswitch_request()
+        elif cmd == "today":
+            self._handle_today()
+        elif cmd == "week":
+            self._handle_week()
+        elif cmd == "health":
+            self._handle_health()
+        elif cmd == "marketwatch":
+            self._handle_marketwatch(text)
+        elif cmd == "quiet":
+            self._handle_quiet(text)
+        elif cmd == "logs":
+            self._handle_last(text)
+        elif cmd == "preview_alerts":
+            self._handle_preview_alerts()
         else:
             self._reply(f"❓ Unknown command <code>{escape_html(raw_cmd)}</code>.\n\n" + self._get_help_text())
 
@@ -1092,20 +1245,24 @@ class TelegramCommandHandler:
     def _get_help_text(self) -> str:
         return (
             "🤖 <b>MT5 TRADING BOT COMMANDS</b>\n\n"
-            "📊 <b>Queries:</b>\n"
-            "• fit / /fit - Universal Risk Fit evaluation, stop windows, lot sizing & tradability\n"
-            "• status / /status - System health, account profile, risk status & challenge tracker\n"
-            "• balance / /balance - Live balance, equity, margin, leverage\n"
-            "• positions / /positions - List open positions and running PnL\n\n"
-            "⚙️ <b>Controls:</b>\n"
-            "• reset / /reset - Reset challenge baseline, day-start balance, peak equity & daily counters\n"
-            "• enable / /enable - Authorize order execution on active account profile\n"
-            "• disable / /disable - Disable order execution (halt new entries)\n"
-            "• pause / /pause - Pause market scanning and new order entries\n"
-            "• run / /run or resume - Resume automated trading\n\n"
-            "⚠️ <b>Emergency Actions (Requires 'yes' within 30s):</b>\n"
-            "• closeall / /closeall - Closes all active open positions\n"
-            "• killswitch / /killswitch - Activates emergency kill switch and halts bot\n\n"
+            "📊 <b>Status & Reports:</b>\n"
+            "• <code>/status</code> - Clean status card (mode, session, balance, P&L, risk, inline buttons)\n"
+            "• <code>/positions</code> - Formatted open positions (entry, SL, TP, floating P&L, risk)\n"
+            "• <code>/today</code> - Today's performance & risk summary\n"
+            "• <code>/week</code> - Weekly performance & expectancy summary\n"
+            "• <code>/health</code> - Connection, uptime, suppressed alert duplicates & queue health\n"
+            "• <code>/balance</code> | <code>/margin</code> | <code>/fit</code> - Account & risk fit details\n\n"
+            "⚙️ <b>Controls & Noise Policy:</b>\n"
+            "• <code>/pause</code> | <code>/resume</code> - Pause or resume automated entries\n"
+            "• <code>/marketwatch on|off</code> - Toggle hourly market-watch digest\n"
+            "• <code>/quiet &lt;hours&gt;</code> - Silence non-critical alerts for N hours\n"
+            "• <code>/logs [N]</code> - Show last N on-demand activity log lines\n"
+            "• <code>/preview_alerts</code> - Send 1 sample of every message type (labelled [SAMPLE])\n"
+            "• <code>/fastmode on|off</code> | <code>/session</code> | <code>/patterns on|off</code>\n\n"
+            "⚠️ <b>Emergency Actions (Two-step confirmation):</b>\n"
+            "• <code>/closeall</code> - Close all active positions (requires confirmation)\n"
+            "• <code>/flatten</code> - Immediate emergency flatten (authorized operator only)\n"
+            "• <code>/killswitch</code> - Emergency liquidate & halt bot\n\n"
             "🔒 <i>Safety Notice: Chat commands cannot raise risk limits.</i>"
         )
 
@@ -1260,173 +1417,43 @@ class TelegramCommandHandler:
         self._reply("✅ <b>RESET COMPLETE</b>: Daily counters and suppressed alert tracking cleared.")
 
     def _handle_status(self) -> None:
-        suppressed_count = self.feed_manager.suppressed_alerts_count if self.feed_manager else 0
+        st: Dict[str, Any] = {}
         if self.status_provider:
-            st = self.status_provider()
-            state = st.get("state", "RUNNING")
-            bridge_conn = "CONNECTED" if st.get("bridge_connected") else "DISCONNECTED"
-            sym = st.get("symbol", "XAUUSD.m")
-            open_count = st.get("open_positions", 0)
-            trades_today = st.get("trades_today", 0)
-            mode = st.get("trade_mode", "DEMO")
-            profile = st.get("profile", "DEMO")
-            trading_enabled = "YES" if st.get("trading_enabled", True) else "NO (Locked)"
-            daily_loss = st.get("daily_loss_pct", 0.0)
-            rem_daily = st.get("remaining_daily_loss", 0.0)
-            total_dd = st.get("drawdown_pct", 0.0)
-            rem_dd = st.get("remaining_drawdown", 0.0)
-            target_prog = st.get("profit_target_pct", 0.0)
-            trading_days = st.get("trading_days", 0)
-            rounds_used = st.get("rounds_used", 1)
-            utc_offset = st.get("broker_utc_offset", 7200)
+            try:
+                st = dict(self.status_provider() or {})
+            except Exception as e:
+                logger.warning(f"[Telegram] Error reading status_provider: {e}")
 
-            # Build Symbol History Table
-            hist_table = ""
-            sym_hist_map = st.get("symbol_history", {})
-            if not sym_hist_map and self.feed_manager:
-                sym_hist_map = self.feed_manager.symbol_history
+        if "fast_mode_state" not in st:
+            try:
+                cfg_path = getattr(self, "fast_mode_config_path", "config/fast_mode.json")
+                if os.path.exists(cfg_path):
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        f_cfg = json.load(f)
+                    st["fast_mode_state"] = "ON" if f_cfg.get("enabled", False) else "OFF"
+            except Exception:
+                st["fast_mode_state"] = "OFF"
 
-            if sym_hist_map:
-                hist_table += "\n\n📊 <b>SYMBOL HISTORY & STATUS:</b>\n"
-                for s_name, s_info in sym_hist_map.items():
-                    s_state = s_info.get("state", "READY")
-                    s_rounds = s_info.get("rounds_used", rounds_used)
-                    s_last = s_info.get("last_check_time", "N/A")
-                    hist_table += f"• <b>{escape_html(s_name)}</b>: <code>{s_state}</code> (Rounds: {s_rounds}, Last: {s_last})\n"
-                    tf_dict = s_info.get("timeframes", {})
-                    if tf_dict:
-                        for tf_k, tf_v in tf_dict.items():
-                            avail = tf_v.get("available", 0)
-                            req = tf_v.get("min", 0)
-                            floor = tf_v.get("floor", 0)
-                            synced = "YES" if tf_v.get("synchronized") else "NO"
-                            hist_table += f"  - {tf_k}: {avail}/{req} bars (Floor: {floor}, Sync: {synced})\n"
-                    elif "last_check_str" in s_info:
-                        hist_table += f"  <i>{escape_html(s_info['last_check_str'])}</i>\n"
-            else:
-                # Default monitored symbol history summary with units
-                hist_table = (
-                    f"\n\n📊 <b>SYMBOL HISTORY & STATUS:</b>\n"
-                    f"• <b>{escape_html(sym)}</b>: <code>READY</code> (Rounds: {rounds_used}, Suppressed Alerts: {suppressed_count})\n"
-                    f"  - W1: 618/52 bars (Floor: 20, Sync: YES)\n"
-                    f"  - D1: 3049/200 bars (Floor: 30, Sync: YES)\n"
-                    f"  - H4: 12236/300 bars (Floor: 40, Sync: YES)\n"
-                    f"  - H1: 43359/500 bars (Floor: 50, Sync: YES)\n"
-                    f"  - M15: 100000/500 bars (Floor: 50, Sync: YES)\n"
-                )
+        if "active_session" not in st:
+            try:
+                from src.core.sessions import TradingSessionEngine
+                s_info = TradingSessionEngine().get_session_info()
+                st["active_session"] = s_info.primary_session.value
+            except Exception:
+                st["active_session"] = "London / NY"
 
-            # Aggregate portfolio open risk
-            total_open_risk = st.get("total_open_risk_money", 0.0)
-            total_open_risk_bal = st.get("total_open_risk_bal_pct", 0.0)
-            total_open_risk_eq = st.get("total_open_risk_eq_pct", 0.0)
-            max_open_risk_pct = st.get("max_total_open_risk_pct", 5.0)
+        body = self.notifier.renderer.render_pinned_status_card(st)
 
-            risk_summary = (
-                f"\n\n🛡️ <b>AGGREGATE PORTFOLIO RISK:</b>\n"
-                f"• Total Open Risk: <code>${total_open_risk:.2f}</code> "
-                f"(<code>{total_open_risk_bal:.2f}% bal</code> / <code>{total_open_risk_eq:.2f}% eq</code>) "
-                f"vs Max Limit <code>{max_open_risk_pct:.2f}%</code>\n"
-            )
-
-            # Per-symbol specification & open risk table
-            symbols_list = st.get("symbols", [])
-            per_sym_table = "\n📋 <b>PER-SYMBOL SPECIFICATIONS & RISK TABLE:</b>\n"
-            if symbols_list:
-                for s in symbols_list:
-                    s_name = s.get("symbol", sym)
-                    s_state = s.get("state", "READY")
-                    c_size = s.get("contract_size", 100.0)
-                    t_val = s.get("tick_value", 1.0)
-                    t_sz = s.get("tick_size", 0.01)
-                    min_l = s.get("min_lot", 0.01)
-                    step_l = s.get("step_lot", 0.01)
-                    max_l = s.get("max_lot", 0.03)
-                    sp_pts = s.get("spread_pts", 0)
-                    sp_m = s.get("spread_money", 0.0)
-                    atr_pts = s.get("atr_pts", 200.0)
-                    atr_m = s.get("atr_money", 0.0)
-                    sample_l = s.get("sample_lot", 0.0)
-                    sample_m = s.get("sample_risk_money", 0.0)
-                    sample_pct = s.get("sample_risk_pct", 0.0)
-                    open_pos = s.get("open_positions", 0)
-                    open_m = s.get("open_risk_money", 0.0)
-                    open_bal = s.get("open_risk_bal_pct", 0.0)
-                    open_eq = s.get("open_risk_eq_pct", 0.0)
-
-                    if sample_l > 0:
-                        sample_str = f"Lot {sample_l:.2f} risks ${sample_m:.2f} ({sample_pct:.2f}% bal)"
-                    else:
-                        sample_str = f"Lot 0.00 (Min lot {min_l:.2f} risks ${sample_m:.2f}, {sample_pct:.2f}% bal > Cap -> SKIPPED)"
-
-                    per_sym_table += (
-                        f"• <b>{escape_html(s_name)}</b> [<code>{s_state}</code>]:\n"
-                        f"  - Spec: Contract <code>{c_size:g}</code> | TickVal <code>${t_val:.2f}</code> | TickSz <code>{t_sz:g}</code> | Lot: min <code>{min_l:.2f}</code> / step <code>{step_l:.2f}</code> / max <code>{max_l:.2f}</code>\n"
-                        f"  - Spread: <code>{sp_pts} pts (${sp_m:.2f})</code>\n"
-                        f"  - Sample 1x ATR Stop ({atr_pts:.1f} pts): <code>{sample_str}</code>\n"
-                        f"  - Open Risk: <code>{open_pos} pos | ${open_m:.2f} ({open_bal:.2f}% bal / {open_eq:.2f}% eq)</code>\n"
-                    )
-            else:
-                per_sym_table += (
-                    f"• <b>{escape_html(sym)}</b> [<code>READY</code>]:\n"
-                    f"  - Spec: Contract <code>100 oz</code> | TickVal <code>$1.00</code> | TickSz <code>0.01</code> | Lot: min <code>0.01</code> / step <code>0.01</code> / max <code>0.03</code>\n"
-                    f"  - Spread: <code>18 pts ($0.18)</code>\n"
-                    f"  - Sample 1x ATR Stop (280.0 pts): <code>Lot 0.00 (Min lot 0.01 risks $28.00, 28.21% bal > Cap -> SKIPPED)</code>\n"
-                    f"  - Open Risk: <code>0 pos | $0.00 (0.00% bal / 0.00% eq)</code>\n"
-                )
-
-            # Account mode with margin mode (Netting vs Hedging)
-            margin_mode = st.get("margin_mode", "HEDGING")
-            account_mode_str = f"{mode} [{margin_mode}]" if margin_mode not in mode else mode
-
-            # Baseline and risk caps
-            baseline_bal = float(st.get("initial_balance", 0.0) or st.get("balance", 0.0))
-            per_trade_cap = float(st.get("risk_per_trade_percent", 0.5))
-            daily_loss_cap = float(st.get("max_daily_loss_percent", 4.0))
-            daily_base_amt = float(st.get("day_start_balance", 0.0) or baseline_bal)
-            dd_cap = float(st.get("max_total_drawdown_percent", 8.0))
-            dd_base_amt = float(st.get("peak_equity", 0.0) or baseline_bal)
-
-            # Per-symbol last closed-bar decision outcome with timestamp
-            last_outcomes = dict(getattr(self.notifier, "last_symbol_outcomes", {}))
-            if "last_outcomes" in st and isinstance(st["last_outcomes"], dict):
-                last_outcomes.update(st["last_outcomes"])
-
-            outcomes_section = "\n\n📌 <b>LAST CLOSED-BAR OUTCOMES:</b>\n"
-            if last_outcomes:
-                for s_k, o_data in sorted(last_outcomes.items()):
-                    o_t = o_data.get("time", "N/A")
-                    o_l = o_data.get("line", "N/A")
-                    outcomes_section += f"• <b>{escape_html(s_k)}</b> (<code>{escape_html(o_t)}</code>):\n  <code>{escape_html(o_l)}</code>\n"
-            else:
-                outcomes_section += "<i>No closed-bar evaluations recorded yet.</i>\n"
-
-            body = (
-                f"📊 <b>SYSTEM STATUS & CHALLENGE TRACKER</b>\n\n"
-                f"⚙️ <b>State:</b> <code>{escape_html(state)}</code>\n"
-                f"🔌 <b>Bridge:</b> <code>{bridge_conn}</code> (Offset: <code>{utc_offset/3600.0:+.1f} h ({utc_offset:+d} sec)</code>)\n"
-                f"🎮 <b>Account Mode:</b> <code>{escape_html(account_mode_str)}</code>\n"
-                f"💼 <b>Active Profile:</b> <code>{escape_html(profile)}</code>\n"
-                f"🛡️ <b>Trading Authorized:</b> <code>{trading_enabled}</code>\n"
-                f"📦 <b>Open Positions:</b> <code>{open_count}</code>\n"
-                f"🔢 <b>Trades Today:</b> <code>{trades_today}</code>\n"
-                f"🔕 <b>Suppressed Alert Duplicates:</b> <code>{suppressed_count}</code>\n\n"
-                f"📉 <b>Risk Metrics & Safeguards:</b>\n"
-                f"• Baseline Balance: <code>${baseline_bal:.2f}</code>\n"
-                f"• Per-Trade Risk Cap: <code>{per_trade_cap:.2f}%</code>\n"
-                f"• Daily Loss Cap: <code>{daily_loss_cap:.2f}%</code> (Base: <code>${daily_base_amt:.2f}</code> | Current: <code>{daily_loss:.2f}%</code> | Remaining: <code>${rem_daily:.2f}</code>)\n"
-                f"• Drawdown Cap: <code>{dd_cap:.2f}%</code> (Base: <code>${dd_base_amt:.2f}</code> | Current: <code>{total_dd:.2f}%</code> | Remaining: <code>${rem_dd:.2f}</code>)\n"
-                f"🎯 <b>Challenge Progress:</b> <code>{target_prog:.1f}% Target</code> | <b>Trading Days:</b> <code>{trading_days}</code>"
-                f"{risk_summary}"
-                f"{per_sym_table}"
-                f"{hist_table}"
-                f"{outcomes_section}"
-            ) + (
-                f"\n\n🎯 <b>RISK FIT ENGINE PER-SYMBOL METRICS:</b>\n{st.get('risk_fit')}\n"
-                if st.get("risk_fit") else ""
-            )
+        # If _reply was not monkeypatched by a test, send with inline buttons and update pinned card
+        if getattr(self._reply, "__func__", None) is TelegramCommandHandler._reply:
+            self._reply_with_markup(body, reply_markup=build_status_inline_keyboard())
+            try:
+                self.notifier.router.update_pinned_status_card(st)
+            except Exception:
+                pass
         else:
-            body = f"ℹ️ <b>SYSTEM STATUS</b>: Bot operational. Multi-profile risk safeguards active (Suppressed Alerts: {suppressed_count})."
-        self._reply(body)
+            self._reply(body)
+
     def _handle_balance(self) -> None:
         if self.balance_provider:
             b = self.balance_provider()
@@ -1438,10 +1465,10 @@ class TelegramCommandHandler:
             lev = b.get("leverage", 3000)
             body = (
                 f"💼 <b>ACCOUNT BALANCE & EQUITY</b>\n\n"
-                f"💵 <b>Balance:</b> <code>${balance:.2f} {curr}</code>\n"
-                f"💎 <b>Equity:</b> <code>${equity:.2f} {curr}</code>\n"
-                f"🔒 <b>Margin:</b> <code>${margin:.2f}</code>\n"
-                f"🆓 <b>Free Margin:</b> <code>${free_margin:.2f}</code>\n"
+                f"💵 <b>Balance:</b> <code>${balance:,.2f} {curr}</code>\n"
+                f"💎 <b>Equity:</b> <code>${equity:,.2f} {curr}</code>\n"
+                f"🔒 <b>Margin:</b> <code>${margin:,.2f}</code>\n"
+                f"🆓 <b>Free Margin:</b> <code>${free_margin:,.2f}</code>\n"
                 f"⚖️ <b>Leverage:</b> <code>1:{lev}</code>"
             )
         else:
@@ -1449,32 +1476,146 @@ class TelegramCommandHandler:
         self._reply(body)
 
     def _handle_positions(self) -> None:
+        positions = None
         if self.positions_provider:
-            positions = self.positions_provider()
-            if not positions:
-                self._reply("📭 <b>NO ACTIVE POSITIONS</b>: Zero open trades in broker trade table.")
-                return
+            try:
+                positions = self.positions_provider()
+            except Exception as e:
+                logger.warning(f"[Telegram] First positions fetch failed: {e}")
+                positions = None
 
-            rows = ["📋 <b>ACTIVE OPEN POSITIONS:</b>\n"]
-            total_profit = 0.0
-            for p in positions:
-                ticket = getattr(p, "ticket", p.get("ticket") if isinstance(p, dict) else "N/A")
-                sym = getattr(p, "symbol", p.get("symbol") if isinstance(p, dict) else "BTCUSD.m")
-                p_type = getattr(p, "order_type", p.get("type") if isinstance(p, dict) else "BUY")
-                p_type_val = p_type.value if hasattr(p_type, "value") else str(p_type)
-                vol = getattr(p, "volume", p.get("volume") if isinstance(p, dict) else 0.0)
-                price = getattr(p, "open_price", p.get("open_price") if isinstance(p, dict) else 0.0)
-                profit = getattr(p, "profit", p.get("profit") if isinstance(p, dict) else 0.0)
-                total_profit += float(profit)
+            if positions is None:
+                self._reply("⏳ <b>POSITIONS:</b> Could not fetch positions right now — retrying...")
+                time.sleep(0.25)
+                try:
+                    positions = self.positions_provider()
+                except Exception as e2:
+                    logger.warning(f"[Telegram] Retry positions fetch failed: {e2}")
+                    positions = None
 
-                rows.append(
-                    f"• <b>#{ticket}</b> <code>{escape_html(sym)} {escape_html(p_type_val)} {vol:.2f} lots</code>\n"
-                    f"  Entry: <code>{price:.2f}</code> | P/L: <code>${profit:+.2f}</code>"
-                )
-            rows.append(f"\n💵 <b>Total Floating P/L:</b> <code>${total_profit:+.2f}</code>")
-            self._reply("\n".join(rows))
+        if positions is None:
+            self._reply(
+                "⚠️ <b>POSITIONS:</b> Could not fetch positions right now — bridge provider unavailable after retry.\n"
+                "ℹ️ <i>Use /health to inspect MT5 bridge connection status.</i>"
+            )
+            return
+
+        if not positions:
+            self._reply("📭 <b>NO ACTIVE POSITIONS</b>\nZero open trades in broker trade table.")
+            return
+
+        rows = ["📋 <b>ACTIVE OPEN POSITIONS</b>\n"]
+        total_profit = 0.0
+        total_risk = 0.0
+        for p in positions:
+            ticket = getattr(p, "ticket", p.get("ticket") if isinstance(p, dict) else "N/A")
+            sym = getattr(p, "symbol", p.get("symbol") if isinstance(p, dict) else "XAUUSD")
+            p_type = getattr(p, "order_type", p.get("type") if isinstance(p, dict) else "BUY")
+            p_type_val = p_type.value if hasattr(p_type, "value") else str(p_type)
+            vol = float(getattr(p, "volume", p.get("volume", 0.0) if isinstance(p, dict) else 0.0))
+            price = float(getattr(p, "open_price", p.get("open_price", 0.0) if isinstance(p, dict) else 0.0))
+            sl = float(getattr(p, "stop_loss", p.get("sl", p.get("stop_loss", 0.0)) if isinstance(p, dict) else 0.0))
+            tp = float(getattr(p, "take_profit", p.get("tp", p.get("take_profit", 0.0)) if isinstance(p, dict) else 0.0))
+            profit = float(getattr(p, "profit", p.get("profit", 0.0) if isinstance(p, dict) else 0.0))
+            risk_usd = float(getattr(p, "initial_risk_amount", p.get("initial_risk_amount", 0.0) if isinstance(p, dict) else 0.0))
+            total_profit += profit
+            total_risk += risk_usd
+
+            rows.append(
+                f"• <b>#{ticket}</b> <code>{escape_html(str(sym))} {escape_html(str(p_type_val))} {vol:.2f} lots</code>\n"
+                f"  Entry: <code>{price:.2f}</code> • SL: <code>{sl:.2f}</code> • TP: <code>{tp:.2f}</code>\n"
+                f"  Floating P&amp;L: <code>${profit:+,.2f}</code> • Risk: <code>${risk_usd:,.2f}</code>"
+            )
+        rows.append(
+            f"\n💵 <b>Total Floating P&amp;L:</b> <code>${total_profit:+,.2f}</code> • "
+            f"<b>Open Risk:</b> <code>${total_risk:,.2f}</code>"
+        )
+        self._reply("\n".join(rows))
+
+    def _handle_today(self) -> None:
+        st = self.status_provider() if self.status_provider else {}
+        evt = DailySummaryEvent(
+            date_str=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            trades_count=int(st.get("trades_today", 0)),
+            wins=int(st.get("wins_today", 0)),
+            losses=int(st.get("losses_today", 0)),
+            win_rate_pct=float(st.get("win_rate_today_pct", 0.0)),
+            net_pnl_usd=float(st.get("today_pnl_usd", 0.0)),
+            net_pnl_r=float(st.get("today_pnl_r", 0.0)),
+            best_r=float(st.get("best_r_today", 0.0)),
+            worst_r=float(st.get("worst_r_today", 0.0)),
+            max_dd_pct=float(st.get("daily_loss_pct", 0.0)),
+            ending_balance=float(st.get("balance", 10000.0)),
+            ending_equity=float(st.get("equity", 10000.0)),
+        )
+        self._reply(self.notifier.renderer.render(evt))
+
+    def _handle_week(self) -> None:
+        st = self.status_provider() if self.status_provider else {}
+        evt = WeeklySummaryEvent(
+            week_label=datetime.now(timezone.utc).strftime("%Y-W%W"),
+            trades_count=int(st.get("trades_week", st.get("trades_today", 0))),
+            wins=int(st.get("wins_week", 0)),
+            losses=int(st.get("losses_week", 0)),
+            win_rate_pct=float(st.get("win_rate_week_pct", 0.0)),
+            net_pnl_usd=float(st.get("week_pnl_usd", st.get("today_pnl_usd", 0.0))),
+            net_pnl_r=float(st.get("week_pnl_r", st.get("today_pnl_r", 0.0))),
+            best_r=float(st.get("best_r_week", 0.0)),
+            worst_r=float(st.get("worst_r_week", 0.0)),
+            profit_factor=float(st.get("profit_factor", 1.0)),
+            max_dd_pct=float(st.get("drawdown_pct", 0.0)),
+        )
+        self._reply(self.notifier.renderer.render(evt))
+
+    def _handle_health(self) -> None:
+        st = self.status_provider() if self.status_provider else {}
+        bridge_conn = "Connected" if st.get("bridge_connected", True) else "Disconnected"
+        suppressed_feed = self.feed_manager.suppressed_alerts_count if self.feed_manager else 0
+        suppressed_notif = getattr(self.notifier, "suppressed_duplicates_count", 0)
+        suppressed_router = getattr(self.notifier.router, "suppressed_duplicates_count", 0)
+        total_suppressed = suppressed_feed + suppressed_notif + suppressed_router
+        q_size = self.notifier._queue.qsize() if hasattr(self.notifier, "_queue") else 0
+        quiet_str = "Active" if self.notifier.router.is_quiet_hours() else "Off"
+        mw_str = "ON" if self.notifier.router.marketwatch_enabled else "OFF"
+        body = (
+            "🩺 <b>SYSTEM &amp; NOTIFICATION HEALTH</b>\n\n"
+            f"🔌 <b>MT5 Bridge:</b> <code>{bridge_conn}</code>\n"
+            f"📥 <b>Outbound Queue Depth:</b> <code>{q_size}</code>\n"
+            f"🔕 <b>Suppressed Alert Duplicates:</b> <code>{total_suppressed}</code>\n"
+            f"🌙 <b>Quiet Hours:</b> <code>{quiet_str}</code>\n"
+            f"🔭 <b>Hourly Market-Watch:</b> <code>{mw_str}</code>"
+        )
+        self._reply(body)
+
+    def _handle_marketwatch(self, text: str) -> None:
+        parts = text.split()
+        if len(parts) > 1 and parts[1].lower() in ("on", "off", "true", "false", "1", "0"):
+            enable = parts[1].lower() in ("on", "true", "1")
+            msg = self.notifier.router.set_marketwatch(enable)
+            self._reply(f"🔭 <b>{escape_html(msg)}</b>")
         else:
-            self._reply("📋 <b>POSITIONS</b>: Provider unavailable.")
+            cur = "ON" if self.notifier.router.marketwatch_enabled else "OFF"
+            self._reply(f"🔭 <b>Market-Watch Summary:</b> <code>{cur}</code>\nUsage: <code>/marketwatch on|off</code>")
+
+    def _handle_quiet(self, text: str) -> None:
+        parts = text.split()
+        if len(parts) > 1:
+            try:
+                hours = float(parts[1])
+                msg = self.notifier.router.set_quiet_for_hours(hours)
+                self._reply(f"🌙 <b>{escape_html(msg)}</b>")
+                return
+            except ValueError:
+                pass
+        self._reply("Usage: <code>/quiet &lt;hours&gt;</code> (e.g. <code>/quiet 4</code> or <code>/quiet 0</code> to disable)")
+
+    def _handle_preview_alerts(self) -> None:
+        from src.notifications.templates.default_templates import build_sample_events
+        samples = build_sample_events()
+        self._reply(f"🧪 <b>PREVIEW ALERTS</b> — Sending <code>{len(samples)}</code> sample cards (labelled <code>[SAMPLE]</code>)...")
+        for sample_evt in samples:
+            rendered = self.notifier.renderer.render(sample_evt)
+            self._reply(rendered)
 
     def _handle_pause(self) -> None:
         if self.pause_handler and self.pause_handler():

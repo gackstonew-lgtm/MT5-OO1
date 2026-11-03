@@ -194,3 +194,139 @@ class TelegramTransport:
                         pass
 
         return (0, {}, "Max retries exceeded")
+
+    def send_message_ex(
+        self,
+        chat_id: str | int,
+        text: str,
+        parse_mode: str = "HTML",
+        disable_notification: bool = False,
+        reply_to_message_id: Optional[int] = None,
+        reply_markup: Optional[Dict[str, Any]] = None,
+        timeout: float = 10.0
+    ) -> Tuple[bool, Optional[int], str]:
+        """
+        Sends a message (or multiple chunks if > 4096 chars) and returns (success, message_id, error_str).
+        """
+        from src.notifications.templates.default_templates import split_message_safely
+        chunks = split_message_safely(text, max_chars=4096)
+        last_msg_id: Optional[int] = None
+        for idx, chunk in enumerate(chunks):
+            payload: Dict[str, Any] = {
+                "chat_id": str(chat_id),
+                "text": chunk,
+                "parse_mode": parse_mode,
+                "disable_notification": bool(disable_notification),
+            }
+            if reply_to_message_id is not None and idx == 0:
+                payload["reply_to_message_id"] = int(reply_to_message_id)
+                payload["allow_sending_without_reply"] = True
+            if reply_markup is not None and idx == len(chunks) - 1:
+                payload["reply_markup"] = reply_markup
+
+            status, data, err = self.request("POST", "sendMessage", payload=payload, timeout=timeout)
+            if status == 200 and data.get("ok"):
+                res = data.get("result", {})
+                if isinstance(res, dict) and "message_id" in res:
+                    last_msg_id = int(res["message_id"])
+            else:
+                desc = data.get("description", err) if isinstance(data, dict) else err
+                return False, last_msg_id, str(desc)
+
+        return True, last_msg_id, ""
+
+    def edit_message_text(
+        self,
+        chat_id: str | int,
+        message_id: int,
+        text: str,
+        parse_mode: str = "HTML",
+        reply_markup: Optional[Dict[str, Any]] = None,
+        timeout: float = 10.0
+    ) -> Tuple[bool, bool, str]:
+        """
+        Edits an existing message in place.
+        Returns (success, should_fallback_to_new_message, error_description).
+        - If 'message is not modified' (HTTP 400), returns (True, False, "not_modified").
+        - If message was deleted or cannot be edited, returns (False, True, desc).
+        """
+        payload: Dict[str, Any] = {
+            "chat_id": str(chat_id),
+            "message_id": int(message_id),
+            "text": truncate_message(text, 4096),
+            "parse_mode": parse_mode,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+
+        status, data, err = self.request("POST", "editMessageText", payload=payload, timeout=timeout)
+        if status == 200 and data.get("ok"):
+            return True, False, ""
+
+        desc = (data.get("description", err) if isinstance(data, dict) else err) or ""
+        desc_lower = desc.lower()
+        if "message is not modified" in desc_lower:
+            return True, False, "not_modified"
+        if any(k in desc_lower for k in ("message to edit not found", "message can't be edited", "bad request", "not found")):
+            return False, True, desc
+        return False, True, desc
+
+    def pin_chat_message(
+        self,
+        chat_id: str | int,
+        message_id: int,
+        disable_notification: bool = True,
+        timeout: float = 10.0
+    ) -> bool:
+        payload = {
+            "chat_id": str(chat_id),
+            "message_id": int(message_id),
+            "disable_notification": bool(disable_notification),
+        }
+        status, data, _ = self.request("POST", "pinChatMessage", payload=payload, timeout=timeout)
+        return bool(status == 200 and data.get("ok"))
+
+    def answer_callback_query(
+        self,
+        callback_query_id: str,
+        text: str = "",
+        show_alert: bool = False,
+        timeout: float = 5.0
+    ) -> bool:
+        payload: Dict[str, Any] = {
+            "callback_query_id": str(callback_query_id),
+            "show_alert": bool(show_alert),
+        }
+        if text:
+            payload["text"] = text[:200]
+        status, data, _ = self.request("POST", "answerCallbackQuery", payload=payload, timeout=timeout)
+        return bool(status == 200 and data.get("ok"))
+
+
+def build_status_inline_keyboard() -> Dict[str, Any]:
+    """Builds the standard inline keyboard for status cards and alerts."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "⏸️ Pause", "callback_data": "cmd_pause"},
+                {"text": "▶️ Resume", "callback_data": "cmd_resume"},
+                {"text": "📊 Status", "callback_data": "cmd_status"},
+            ],
+            [
+                {"text": "📋 Positions", "callback_data": "cmd_positions"},
+                {"text": "🚨 Close All", "callback_data": "cmd_closeall_prompt"},
+            ],
+        ]
+    }
+
+
+def build_closeall_confirm_keyboard() -> Dict[str, Any]:
+    """Builds the two-step confirmation inline keyboard for Close All."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Confirm Close All", "callback_data": "cmd_closeall_confirm"},
+                {"text": "❌ Cancel", "callback_data": "cmd_closeall_cancel"},
+            ]
+        ]
+    }

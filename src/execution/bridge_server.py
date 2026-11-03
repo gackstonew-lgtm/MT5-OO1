@@ -100,6 +100,12 @@ class PersistentBridgeServer:
                     config=tg_cfg,
                     notifier=self.notifier,
                     status_provider=self._get_status_dict,
+                    positions_provider=self._get_positions_list,
+                    balance_provider=self._get_balance_dict,
+                    pause_handler=self._disable_trading_action,
+                    resume_handler=self._enable_trading_action,
+                    closeall_handler=self._close_all_action,
+                    killswitch_handler=self._kill_switch_action,
                     enable_handler=self._enable_trading_action,
                     disable_handler=self._disable_trading_action,
                     feed_manager=self.feed_manager,
@@ -499,6 +505,49 @@ class PersistentBridgeServer:
             except Exception as e:
                 logger.debug(f"Status query failed in callback: {e}")
         return st
+
+    def _get_positions_list(self) -> List[Dict[str, Any]]:
+        """Queries open positions from MT5 EA for /positions command."""
+        if not self.is_ea_connected():
+            return []
+        try:
+            res = self.forward_request_to_ea({"action": "POSITIONS"}, timeout_sec=3.0)
+            if res.get("status") == "SUCCESS":
+                data = res.get("data", [])
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            logger.debug(f"Positions query failed in callback: {e}")
+        return []
+
+    def _get_balance_dict(self) -> Dict[str, Any]:
+        """Queries account balance/equity/margin from MT5 EA for /balance and /margin commands."""
+        if not self.is_ea_connected():
+            return {}
+        try:
+            res = self.forward_request_to_ea({"action": "ACCOUNT"}, timeout_sec=3.0)
+            if res.get("status") == "SUCCESS":
+                data = res.get("data", {})
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            logger.debug(f"Account query failed in callback: {e}")
+        return {}
+
+    def _close_all_action(self) -> int:
+        if not self.is_ea_connected():
+            return 0
+        try:
+            res = self.forward_request_to_ea({"action": "CLOSE_ALL"}, timeout_sec=5.0)
+            if res.get("status") == "SUCCESS":
+                return int(res.get("closed_count", res.get("closed", 0)))
+        except Exception:
+            pass
+        return 0
+
+    def _kill_switch_action(self) -> bool:
+        self._close_all_action()
+        return self._disable_trading_action()
 
     def _enable_trading_action(self) -> bool:
         if not self.is_ea_connected():
