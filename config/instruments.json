@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "instruments": {
+    "XAUUSD": {
+      "canonical": "XAUUSD",
+      "aliases": ["XAUUSD.m", "XAUUSDm", "XAUUSD.micro", "GOLD", "GOLD.m", "GOLDm", "XAU/USD"],
+      "asset_class": "METALS",
+      "pip_size": 0.1,
+      "point": 0.01,
+      "min_confidence": 45.0,
+      "max_spread_points": 2000.0,
+      "max_spread_pct_of_sl": 35.0,
+      "atr_sl_min_multiplier": 1.2,
+      "atr_sl_max_multiplier": 4.0,
+      "target_rr": 1.8,
+      "max_positions_per_symbol": 1,
+      "preferred_timeframes": ["M1", "M5", "M15"],
+      "notes": "Gold requires wider ATR-calibrated stops to survive micro-noise."
+    },
+    "BTCUSD": {
+      "canonical": "BTCUSD",
+      "aliases": ["BTCUSD.m", "BTCUSDm", "BTCUSD.micro", "BTC/USD"],
+      "asset_class": "CRYPTO",
+      "pip_size": 1.0,
+      "point": 0.01,
+      "min_confidence": 50.0,
+      "max_spread_points": 2000.0,
+      "max_spread_pct_of_sl": 25.0,
+      "atr_sl_min_multiplier": 1.0,
+      "atr_sl_max_multiplier": 3.5,
+      "target_rr": 1.8,
+      "max_positions_per_symbol": 1,
+      "preferred_timeframes": ["M1", "M5", "M15"],
+      "notes": "Crypto spread and slippage are wide; require stronger confluence."
+    },
+    "EURUSD": {
+      "canonical": "EURUSD",
+      "aliases": ["EURUSD.m", "EURUSDm", "EUR/USD"],
+      "asset_class": "FX_MAJOR",
+      "pip_size": 0.0001,
+      "point": 0.00001,
+      "min_confidence": 45.0,
+      "max_spread_points": 300.0,
+      "max_spread_pct_of_sl": 20.0,
+      "atr_sl_min_multiplier": 0.8,
+      "atr_sl_max_multiplier": 3.0,
+      "target_rr": 1.5,
+      "max_positions_per_symbol": 1,
+      "preferred_timeframes": ["M1", "M5", "M15"]
+    },
+    "GBPUSD": {
+      "canonical": "GBPUSD",
+      "aliases": ["GBPUSD.m", "GBPUSDm", "GBP/USD"],
+      "asset_class": "FX_MAJOR",
+      "pip_size": 0.0001,
+      "point": 0.00001,
+      "min_confidence": 45.0,
+      "max_spread_points": 400.0,
+      "max_spread_pct_of_sl": 20.0,
+      "atr_sl_min_multiplier": 0.8,
+      "atr_sl_max_multiplier": 3.2,
+      "target_rr": 1.5,
+      "max_positions_per_symbol": 1,
+      "preferred_timeframes": ["M1", "M5", "M15"]
+    },
+    "USDJPY": {
+      "canonical": "USDJPY",
+      "aliases": ["USDJPY.m", "USDJPYm", "USD/JPY"],
+      "asset_class": "FX_MAJOR",
+      "pip_size": 0.01,
+      "point": 0.001,
+      "min_confidence": 45.0,
+      "max_spread_points": 300.0,
+      "max_spread_pct_of_sl": 20.0,
+      "atr_sl_min_multiplier": 0.8,
+      "atr_sl_max_multiplier": 3.0,
+      "target_rr": 1.5,
+      "max_positions_per_symbol": 1,
+      "preferred_timeframes": ["M1", "M5", "M15"]
+    }
+  }
+}

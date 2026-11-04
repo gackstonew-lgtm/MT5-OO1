@@ -95,9 +95,9 @@ class SymbolScanner:
             else:
                 s_liq = 2.0
 
-            # 5. News Proximity Score (max 10 pts)
-            in_blackout, news_reason = self.news_filter.is_in_blackout(sym, current_time=t)
-            s_news = 0.0 if in_blackout else 10.0
+            # 5. Unrestricted Execution Readiness Score (max 10 pts; news restrictions completely removed)
+            in_blackout = False
+            s_news = 10.0
 
             total = s_struct + s_htf + s_spread + s_liq + s_news
 
@@ -111,16 +111,16 @@ class SymbolScanner:
                     liquidity_score=s_liq,
                     news_score=s_news,
                     structure_state=st.value,
-                    in_news_blackout=in_blackout,
-                    rejection_reason=news_reason if in_blackout else None
+                    in_news_blackout=False,
+                    rejection_reason=None
                 )
             )
 
-        # Sort descending by total score, with non-blackout symbols prioritized
-        scored.sort(key=lambda x: (not x.in_news_blackout, x.total_score), reverse=True)
+        # Sort descending by total score
+        scored.sort(key=lambda x: x.total_score, reverse=True)
 
-        # Select top N eligible symbols
-        selected = [s.symbol for s in scored if not s.in_news_blackout][:self.top_n]
+        # Select top N eligible symbols (no news-based symbol restrictions)
+        selected = [s.symbol for s in scored][:self.top_n]
 
         # Log at DECISION level
         top_str = ", ".join([f"{s.symbol} ({s.total_score}pts)" for s in scored[:self.top_n]])

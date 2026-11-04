@@ -15,6 +15,7 @@ class Timeframe(str, Enum):
     D1 = "D1"
     H4 = "H4"
     H1 = "H1"
+    M30 = "M30"
     M15 = "M15"
     M5 = "M5"
     M1 = "M1"
@@ -26,6 +27,7 @@ class Timeframe(str, Enum):
             Timeframe.D1: 1440,
             Timeframe.H4: 240,
             Timeframe.H1: 60,
+            Timeframe.M30: 30,
             Timeframe.M15: 15,
             Timeframe.M5: 5,
             Timeframe.M1: 1,
@@ -456,6 +458,13 @@ class Position:
     initial_sl_distance: float = 0.0
     break_even_activated: bool = False
     partial_taken: bool = False
+    profit_floor_locked: bool = False
+    peak_net_profit: float = 0.0
+
+    @property
+    def net_profit(self) -> float:
+        """Net floating profit in account currency including commission and swap."""
+        return round(float(self.profit) + float(self.commission) + float(self.swap), 2)
 class DecisionOutcomeType(str, Enum):
     TRADE_SENT = "TRADE SENT"
     TRADE_SKIPPED = "TRADE SKIPPED"
@@ -649,3 +658,50 @@ class ExecutionLatencyRecord:
             "status": self.status,
             "timestamp": self.timestamp.isoformat()
         }
+
+
+@dataclass
+class DataHealthStatus:
+    symbol: str
+    broker_symbol: str
+    timeframe: Timeframe
+    requested_count: int = 0
+    received_count: int = 0
+    required_minimum: int = 20
+    latest_completed_bar_time: Optional[datetime] = None
+    forming_bar_time: Optional[datetime] = None
+    freshness_seconds: float = 0.0
+    missing_gaps_count: int = 0
+    duplicate_bars_removed: int = 0
+    invalid_bars_removed: int = 0
+    connection_status: str = "CONNECTED"
+    source: str = "NONE"
+    last_sync_time: Optional[datetime] = None
+    retry_count: int = 0
+    is_stale: bool = False
+    is_healthy: bool = False
+    failure_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "broker_symbol": self.broker_symbol,
+            "timeframe": self.timeframe.value if hasattr(self.timeframe, "value") else str(self.timeframe),
+            "requested_count": self.requested_count,
+            "received_count": self.received_count,
+            "required_minimum": self.required_minimum,
+            "latest_completed_bar_time": self.latest_completed_bar_time.isoformat() if self.latest_completed_bar_time else None,
+            "forming_bar_time": self.forming_bar_time.isoformat() if self.forming_bar_time else None,
+            "freshness_seconds": round(self.freshness_seconds, 1),
+            "missing_gaps_count": self.missing_gaps_count,
+            "duplicate_bars_removed": self.duplicate_bars_removed,
+            "invalid_bars_removed": self.invalid_bars_removed,
+            "connection_status": self.connection_status,
+            "source": self.source,
+            "last_sync_time": self.last_sync_time.isoformat() if self.last_sync_time else None,
+            "retry_count": self.retry_count,
+            "is_stale": self.is_stale,
+            "is_healthy": self.is_healthy,
+            "failure_reason": self.failure_reason,
+        }
+

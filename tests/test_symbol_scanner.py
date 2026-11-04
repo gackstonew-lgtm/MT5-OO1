@@ -1,11 +1,12 @@
 """
-Unit tests for Phase 5: Multi-Symbol Scanner and News Blackout Filter.
+Unit tests for Phase 5: Multi-Symbol Scanner and Unrestricted Symbol Selection
+(with Economic News Filter completely removed).
 """
 
 import unittest
 from datetime import datetime, timezone, timedelta
 
-from src.core.contracts import Timeframe, TrendBias
+from src.core.contracts import Timeframe
 from src.smc.structure_confirmation import StructureStateMachine, ConfirmationState
 from src.smc.news_filter import NewsFilterEngine, EconomicEvent
 from src.smc.symbol_scanner import SymbolScanner
@@ -14,7 +15,7 @@ from src.smc.symbol_scanner import SymbolScanner
 class TestSymbolScanner(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 11, 3, 13, 0, 0, tzinfo=timezone.utc)
-        self.news_filter = NewsFilterEngine(blackout_minutes_before=15, blackout_minutes_after=15)
+        self.news_filter = NewsFilterEngine()
         self.struct_machine = StructureStateMachine()
 
         # Set up a symbol with BOS_CONFIRMED
@@ -53,9 +54,8 @@ class TestSymbolScanner(unittest.TestCase):
         self.assertEqual(selected, ["EURUSD", "GBPUSD"])
         self.assertNotIn("BTCUSD", selected)
 
-    def test_news_blackout_excludes_symbol(self):
-        """Verifies high-impact economic news excludes symbol during blackout window."""
-        # Add high-impact EUR event at 13:10 UTC (current time is 13:00, so 10 mins before event)
+    def test_news_filter_completely_removed_never_blocks_symbol(self):
+        """Verifies economic news events never block or penalize symbols during continuous scalping."""
         event = EconomicEvent(
             event_id="ECB_01",
             currency="EUR",
@@ -66,8 +66,8 @@ class TestSymbolScanner(unittest.TestCase):
         self.news_filter.add_event(event)
 
         in_blackout, reason = self.news_filter.is_in_blackout("EURUSD", current_time=self.now)
-        self.assertTrue(in_blackout)
-        self.assertIn("ECB Interest Rate Decision", reason)
+        self.assertFalse(in_blackout)
+        self.assertIsNone(reason)
 
         scanner = SymbolScanner(top_n=2, news_filter=self.news_filter, struct_machine=self.struct_machine)
         symbols_data = {
@@ -77,13 +77,10 @@ class TestSymbolScanner(unittest.TestCase):
 
         ranked, selected = scanner.rank_symbols(symbols_data, current_time=self.now)
 
-        # EURUSD has USD, so it is in blackout
         eur_item = [s for s in ranked if s.symbol == "EURUSD"][0]
-        self.assertTrue(eur_item.in_news_blackout)
-        self.assertEqual(eur_item.news_score, 0.0)
-
-        # EURUSD must be excluded from selected top list
-        self.assertNotIn("EURUSD", selected)
+        self.assertFalse(eur_item.in_news_blackout)
+        self.assertEqual(eur_item.news_score, 10.0)
+        self.assertIn("EURUSD", selected)
         self.assertIn("GBPUSD", selected)
 
 

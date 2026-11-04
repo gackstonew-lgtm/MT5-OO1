@@ -1,4 +1,25 @@
 {
+  "BTCUSD": {
+    "digits": 2,
+    "point": 0.01,
+    "tick_size": 0.01,
+    "tick_value": 1.0,
+    "contract_size": 1.0,
+    "min_lot": 0.01,
+    "max_lot": 10.0,
+    "lot_step": 0.01,
+    "pip_size": 1.0,
+    "max_allowed_spread_pips": 75.0,
+    "min_bars": {
+      "W1": 30,
+      "D1": 150,
+      "H4": 250,
+      "H1": 400,
+      "M30": 400,
+      "M15": 400,
+      "M5": 400
+    }
+  },
   "BTCUSD.m": {
     "digits": 2,
     "point": 0.01,
@@ -9,19 +30,21 @@
     "max_lot": 10.0,
     "lot_step": 0.01,
     "pip_size": 1.0,
-    "max_allowed_spread_pips": 50.0,
+    "max_allowed_spread_pips": 75.0,
     "min_bars": {
       "W1": 30,
       "D1": 150,
       "H4": 250,
       "H1": 400,
-      "M15": 400
+      "M30": 400,
+      "M15": 400,
+      "M5": 400
     }
   },
   "EURUSD": {
     "digits": 5,
-    "point": 0.00001,
-    "tick_size": 0.00001,
+    "point": 1e-05,
+    "tick_size": 1e-05,
     "tick_value": 1.0,
     "contract_size": 100000.0,
     "min_lot": 0.01,
@@ -34,13 +57,36 @@
       "D1": 200,
       "H4": 300,
       "H1": 500,
-      "M15": 500
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
+    }
+  },
+  "EURUSD.m": {
+    "digits": 5,
+    "point": 1e-05,
+    "tick_size": 1e-05,
+    "tick_value": 1.0,
+    "contract_size": 100000.0,
+    "min_lot": 0.01,
+    "max_lot": 100.0,
+    "lot_step": 0.01,
+    "pip_size": 0.0001,
+    "max_allowed_spread_pips": 2.5,
+    "min_bars": {
+      "W1": 52,
+      "D1": 200,
+      "H4": 300,
+      "H1": 500,
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
     }
   },
   "GBPUSD": {
     "digits": 5,
-    "point": 0.00001,
-    "tick_size": 0.00001,
+    "point": 1e-05,
+    "tick_size": 1e-05,
     "tick_value": 1.0,
     "contract_size": 100000.0,
     "min_lot": 0.01,
@@ -53,7 +99,30 @@
       "D1": 200,
       "H4": 300,
       "H1": 500,
-      "M15": 500
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
+    }
+  },
+  "GBPUSD.m": {
+    "digits": 5,
+    "point": 1e-05,
+    "tick_size": 1e-05,
+    "tick_value": 1.0,
+    "contract_size": 100000.0,
+    "min_lot": 0.01,
+    "max_lot": 100.0,
+    "lot_step": 0.01,
+    "pip_size": 0.0001,
+    "max_allowed_spread_pips": 3.0,
+    "min_bars": {
+      "W1": 52,
+      "D1": 200,
+      "H4": 300,
+      "H1": 500,
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
     }
   },
   "USDJPY": {
@@ -72,7 +141,30 @@
       "D1": 200,
       "H4": 300,
       "H1": 500,
-      "M15": 500
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
+    }
+  },
+  "USDJPY.m": {
+    "digits": 3,
+    "point": 0.001,
+    "tick_size": 0.001,
+    "tick_value": 0.67,
+    "contract_size": 100000.0,
+    "min_lot": 0.01,
+    "max_lot": 100.0,
+    "lot_step": 0.01,
+    "pip_size": 0.01,
+    "max_allowed_spread_pips": 2.5,
+    "min_bars": {
+      "W1": 52,
+      "D1": 200,
+      "H4": 300,
+      "H1": 500,
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
     }
   },
   "XAUUSD": {
@@ -85,13 +177,15 @@
     "max_lot": 50.0,
     "lot_step": 0.01,
     "pip_size": 0.1,
-    "max_allowed_spread_pips": 4.5,
+    "max_allowed_spread_pips": 8.5,
     "min_bars": {
       "W1": 52,
       "D1": 200,
       "H4": 300,
       "H1": 500,
-      "M15": 500
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
     }
   },
   "XAUUSD.m": {
@@ -104,13 +198,15 @@
     "max_lot": 50.0,
     "lot_step": 0.01,
     "pip_size": 0.1,
-    "max_allowed_spread_pips": 4.5,
+    "max_allowed_spread_pips": 8.5,
     "min_bars": {
       "W1": 52,
       "D1": 200,
       "H4": 300,
       "H1": 500,
-      "M15": 500
+      "M30": 500,
+      "M15": 500,
+      "M5": 500
     }
   }
 }

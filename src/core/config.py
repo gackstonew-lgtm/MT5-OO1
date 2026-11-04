@@ -1,6 +1,7 @@
 """
 System Configuration Engine.
 Loads, validates, and manages configuration files and environment overrides.
+Supports both Institutional SMC and Continuous Adaptive Scalping modes.
 """
 
 from __future__ import annotations
@@ -22,10 +23,10 @@ class PropFirmRulesConfig:
     max_lot_cap: float = 0.5
     no_weekend_holding: bool = True
     weekend_close_hour_friday: int = 22
-    news_filter_enabled: bool = True
-    news_block_minutes_before: int = 15
-    news_block_minutes_after: int = 15
-    forbid_tick_scalping: bool = True
+    news_filter_enabled: bool = False
+    news_block_minutes_before: int = 0
+    news_block_minutes_after: int = 0
+    forbid_tick_scalping: bool = False
 
 
 @dataclass
@@ -37,7 +38,7 @@ class AccountProfileConfig:
     max_open_positions: int = 3
     max_daily_loss_percent: float = 5.0
     max_total_drawdown_percent: float = 10.0
-    safety_buffer_percent: float = 80.0  # Stop opening trades at 80% of limit
+    safety_buffer_percent: float = 80.0
     profit_target_percent: float = 10.0
     min_trading_days: int = 4
     daily_reset_hour: int = 0
@@ -70,7 +71,8 @@ def get_default_account_profiles() -> Dict[str, AccountProfileConfig]:
                 min_trade_duration_seconds=0,
                 max_lot_cap=1.0,
                 no_weekend_holding=False,
-                news_filter_enabled=False
+                news_filter_enabled=False,
+                forbid_tick_scalping=False
             )
         ),
         "LIVE": AccountProfileConfig(
@@ -94,9 +96,10 @@ def get_default_account_profiles() -> Dict[str, AccountProfileConfig]:
                 max_lot_cap=0.5,
                 no_weekend_holding=True,
                 weekend_close_hour_friday=22,
-                news_filter_enabled=True,
-                news_block_minutes_before=15,
-                news_block_minutes_after=15
+                news_filter_enabled=False,
+                news_block_minutes_before=0,
+                news_block_minutes_after=0,
+                forbid_tick_scalping=False
             )
         ),
         "PROP": AccountProfileConfig(
@@ -120,10 +123,10 @@ def get_default_account_profiles() -> Dict[str, AccountProfileConfig]:
                 max_lot_cap=0.5,
                 no_weekend_holding=True,
                 weekend_close_hour_friday=21,
-                news_filter_enabled=True,
-                news_block_minutes_before=15,
-                news_block_minutes_after=15,
-                forbid_tick_scalping=True
+                news_filter_enabled=False,
+                news_block_minutes_before=0,
+                news_block_minutes_after=0,
+                forbid_tick_scalping=False
             )
         )
     }
@@ -131,33 +134,58 @@ def get_default_account_profiles() -> Dict[str, AccountProfileConfig]:
 
 @dataclass
 class RiskConfig:
-    risk_percentage: float = 0.5  # 0.5% risk per trade default
-    sizing_reference: str = "EQUITY"  # "EQUITY", "BALANCE", or "CONSERVATIVE"
-    max_daily_loss_percent: float = 2.0  # 2% max daily loss
-    max_weekly_loss_percent: float = 4.0  # 4% max weekly loss
-    max_aggregate_open_risk_percent: float = 1.5  # 1.5% total open risk
+    risk_profile: str = "ADAPTIVE_SCALPING"
+    risk_percentage: float = 0.5
+    sizing_reference: str = "EQUITY"
+    max_daily_loss_enabled: bool = True
+    max_daily_loss_percent: float = 2.0
+    max_weekly_loss_percent: float = 4.0
+    max_drawdown_protection_enabled: bool = True
+    max_aggregate_open_risk_percent: float = 1.5
     max_simultaneous_positions: int = 3
     max_trades_per_session: int = 2
     max_consecutive_losses: int = 3
-    min_risk_reward_ratio: float = 2.0  # 1:2 default minimum R:R
+    min_risk_reward_ratio: float = 1.5
+    scalping_min_risk_reward_ratio: float = 1.2
+    max_spread_pct_of_sl_scalping: float = 20.0
+    max_spread_pct_of_sl: float = 5.0
+    max_spread_points_absolute: float = 2000.0
+    # 0 => fall back to the account profile's max_open_positions for that symbol.
+    max_positions_per_symbol: int = 0
+    # Temporary per-symbol pause after N consecutive losses on that symbol.
+    consecutive_loss_cooldown_minutes: int = 15
+    consecutive_loss_trigger: int = 2
+    # Risk multiplier applied while a consecutive-loss cooldown is active.
+    consecutive_loss_risk_reduction: float = 0.5
+    # Correlation guard: max simultaneous positions sharing a correlation group.
+    max_correlated_positions: int = 2
     enable_break_even: bool = True
-    break_even_at_r: float = 1.0  # Move SL to BE at +1.0R
+    break_even_at_r: float = 1.0
+    scalp_break_even_at_r: float = 0.5
     break_even_buffer_pips: float = 1.0
     enable_partial_tp: bool = True
-    partial_tp_at_r: float = 1.5  # Take 50% partial at +1.5R
+    partial_tp_at_r: float = 1.5
+    scalp_partial_tp_at_r: float = 1.0
     partial_tp_ratio: float = 0.5
     trailing_stop_enabled: bool = True
     trailing_stop_atr_multiplier: float = 1.5
+    dynamic_take_profit: bool = True
     enable_time_stop: bool = False
     time_stop_max_bars: int = 32
     enable_session_end_flatten: bool = False
     enable_partial_at_1r: bool = False
     enable_swing_trailing: bool = False
+    enable_profit_management_5usd: bool = True
+    min_net_profit_target_usd: float = 5.0
+    profit_floor_lock_usd: float = 5.0
+    strong_momentum_profit_extension: bool = True
+    profit_extension_lock_ratio: float = 0.65
+    enable_structural_reversal_exit: bool = True
 
 
 @dataclass
 class SessionConfig:
-    broker_utc_offset_hours: int = 2  # Default MT5 broker server time (e.g. UTC+2 / UTC+3 in summer)
+    broker_utc_offset_hours: int = 2
     asian_start: str = "00:00"
     asian_end: str = "08:00"
     london_start: str = "08:00"
@@ -175,15 +203,19 @@ class SessionConfig:
 
 @dataclass
 class StrategyConfig:
-    min_confluence_score: float = 75.0  # Out of 100
+    min_confluence_score: float = 75.0
+    scalping_min_confluence_score: float = 55.0
+    scalping_min_rr: float = 1.5
     allow_countertrend: bool = False
-    countertrend_risk_multiplier: float = 0.5  # 50% risk if countertrend
+    countertrend_risk_multiplier: float = 0.5
     require_mss_close_confirmation: bool = True
     fvg_min_pips: float = 2.0
     ote_fib_entry_min: float = 0.62
     ote_fib_entry_max: float = 0.79
     ote_fib_invalidation: float = 1.00
-    scalp_require_htf_agreement: bool = True  # SCALP requires M15, H1, H4 agreement
+    scalp_require_htf_agreement: bool = True
+    continuous_scalp_require_htf_agreement: bool = False
+    adaptive_entry_filters: bool = True
     swing_lookback_bars: int = 5
     require_close_break: bool = True
     require_lower_high: bool = True
@@ -195,6 +227,22 @@ class StrategyConfig:
 @dataclass
 class AppConfig:
     execution_mode: ExecutionMode = ExecutionMode.SIMULATION
+    trading_mode: str = "CONTINUOUS_SCALPING"
+    execution_timeframes: List[str] = field(default_factory=lambda: ["M1", "M5"])
+    context_timeframes: List[str] = field(default_factory=lambda: ["M15", "H1"])
+    news_filter_enabled: bool = False
+    continuous_scanning: bool = True
+    adaptive_entry_filters: bool = True
+    dynamic_take_profit: bool = True
+    break_even_enabled: bool = True
+    trailing_stop_enabled: bool = True
+    partial_profit_enabled: bool = True
+    auto_rescan_after_closure: bool = True
+    multi_symbol_execution: bool = True
+    risk_profile: str = "ADAPTIVE_SCALPING"
+    max_daily_loss_enabled: bool = True
+    max_drawdown_protection_enabled: bool = True
+
     symbols: List[str] = field(default_factory=lambda: ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"])
     primary_signal_timeframe: str = "M15"
     htf_timeframes: List[str] = field(default_factory=lambda: ["W1", "D1", "H4", "H1"])
@@ -230,7 +278,12 @@ class AppConfig:
     validation_gates_enabled: bool = False
 
     def get_magic_for_symbol(self, symbol: str) -> int:
-        offset = self.symbol_magic_offsets.get(symbol, (abs(hash(symbol)) % 900) + 10)
+        if symbol in self.symbol_magic_offsets:
+            return self.magic_number + self.symbol_magic_offsets[symbol]
+        base = symbol[:-2] if symbol.endswith(".m") else f"{symbol}.m"
+        if base in self.symbol_magic_offsets:
+            return self.magic_number + self.symbol_magic_offsets[base]
+        offset = (abs(hash(symbol)) % 900) + 10
         return self.magic_number + offset
 
     @classmethod
@@ -240,14 +293,37 @@ class AppConfig:
 
         config_path = Path(config_dir)
         settings_file = config_path / "settings.json"
-        
+
         cfg = cls()
         if settings_file.exists():
             try:
-                with open(settings_file, "r") as f:
+                with open(settings_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if "execution_mode" in data:
                         cfg.execution_mode = ExecutionMode(data["execution_mode"])
+                    if "TRADING_MODE" in data:
+                        cfg.trading_mode = str(data["TRADING_MODE"])
+                    if "EXECUTION_TIMEFRAMES" in data and isinstance(data["EXECUTION_TIMEFRAMES"], list):
+                        cfg.execution_timeframes = [str(x) for x in data["EXECUTION_TIMEFRAMES"]]
+                    if "CONTEXT_TIMEFRAMES" in data and isinstance(data["CONTEXT_TIMEFRAMES"], list):
+                        cfg.context_timeframes = [str(x) for x in data["CONTEXT_TIMEFRAMES"]]
+                    cfg.news_filter_enabled = False  # Permanently disabled
+                    for upper_k, attr_k in [
+                        ("CONTINUOUS_SCANNING", "continuous_scanning"),
+                        ("ADAPTIVE_ENTRY_FILTERS", "adaptive_entry_filters"),
+                        ("DYNAMIC_TAKE_PROFIT", "dynamic_take_profit"),
+                        ("BREAK_EVEN_ENABLED", "break_even_enabled"),
+                        ("TRAILING_STOP_ENABLED", "trailing_stop_enabled"),
+                        ("PARTIAL_PROFIT_ENABLED", "partial_profit_enabled"),
+                        ("AUTO_RESCAN_AFTER_CLOSURE", "auto_rescan_after_closure"),
+                        ("MULTI_SYMBOL_EXECUTION", "multi_symbol_execution"),
+                        ("MAX_DAILY_LOSS_ENABLED", "max_daily_loss_enabled"),
+                        ("MAX_DRAWDOWN_PROTECTION_ENABLED", "max_drawdown_protection_enabled"),
+                    ]:
+                        if upper_k in data:
+                            setattr(cfg, attr_k, bool(data[upper_k]))
+                    if "RISK_PROFILE" in data:
+                        cfg.risk_profile = str(data["RISK_PROFILE"])
                     if "symbols" in data:
                         cfg.symbols = data["symbols"]
                     if "bridge_host" in data:
@@ -273,12 +349,15 @@ class AppConfig:
         strat_file = config_path / "strategy_config.json"
         if strat_file.exists():
             try:
-                with open(strat_file, "r") as f:
+                with open(strat_file, "r", encoding="utf-8") as f:
                     sdata = json.load(f)
                     if "scalp_require_htf_agreement" in sdata:
                         cfg.strategy.scalp_require_htf_agreement = bool(sdata["scalp_require_htf_agreement"])
                     elif "ict_smc" in sdata and "scalp_require_htf_agreement" in sdata["ict_smc"]:
                         cfg.strategy.scalp_require_htf_agreement = bool(sdata["ict_smc"]["scalp_require_htf_agreement"])
+                    for k in ["continuous_scalp_require_htf_agreement", "scalping_min_confluence_score", "scalping_min_rr", "adaptive_entry_filters"]:
+                        if k in sdata and hasattr(cfg.strategy, k):
+                            setattr(cfg.strategy, k, sdata[k])
                     ict_data = sdata.get("ict_smc", sdata)
                     for k in ["require_close_break", "require_lower_high", "choch_timeout_bars", "allow_choch_only_entries", "failed_choch_action", "swing_lookback_bars"]:
                         if k in ict_data and hasattr(cfg.strategy, k):
@@ -289,7 +368,7 @@ class AppConfig:
         risk_file = config_path / "risk_config.json"
         if risk_file.exists():
             try:
-                with open(risk_file, "r") as f:
+                with open(risk_file, "r", encoding="utf-8") as f:
                     rdata = json.load(f)
                     for k, v in rdata.items():
                         if hasattr(cfg.risk, k):
