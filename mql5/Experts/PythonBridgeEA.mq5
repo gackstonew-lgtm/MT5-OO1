@@ -63,7 +63,7 @@ input uint                InpWatchdogTimeoutSec    = 30;          // Heartbeat W
 //--- Input Parameters: Adaptive Strategy Mode
 input group "=== Strategy Modes ==="
 input ENUM_STRATEGY_MODE  InpStrategyMode          = MODE_AUTO;   // Strategy Mode (AUTO/SCALP/HOLD)
-input bool                InpScalpRequireHTFAgreement = true;     // SCALP Requires M15, H1, H4 Agreement
+input bool                InpScalpRequireHTFAgreement = false;    // SCALP Requires HTF Agreement (false allows M1/M5 independent scalping)
 input int                 InpATRPeriod             = 14;          // ATR Period
 input double              InpADXThreshold          = 22.0;        // ADX Momentum Threshold for Scalp
 input double              InpScalpTP_ATRMult       = 0.8;         // Scalp Take Profit (x ATR M5)
@@ -109,30 +109,30 @@ input bool                 InpAcknowledgedHighRiskMicroaccount = false;   // Exp
 input double               InpAbsoluteRiskCeiling   = 5.0;                 // Absolute maximum risk ceiling %
 input double               InpMaxRiskPercent        = 1.0;                 // Default Risk % Per Trade
 input double               InpMaxRiskPercentPerTrade= 2.0;                 // Hard Cap: Max Risk % Per Trade
-input double               InpMinRR                 = 2.0;                 // Hard Cap: Min Reward-to-Risk Ratio
+input double               InpMinRR                 = 1.2;                 // Configurable Min Reward-to-Risk Ratio (Scalping friendly)
 input double               InpReducedHistoryRiskFactor = 0.5;              // Risk Multiplier in Reduced History Mode
 input double               InpMaxTotalOpenRiskPercent = 5.0;              // Hard Cap: Max Total Open Risk % Across All Symbols
 input double               InpMaxMarginPercentOfFree= 50.0;                // Max Margin Allowed (% of Free Margin)
 input double               InpMaxLot                = 0.5;                 // Hard Cap: Maximum Lot Size
 input int                  InpMaxPositions          = 3;                   // Hard Cap: Max Open Positions
-input int                  InpMaxTradesPerDay       = 10;                  // Hard Cap: Max Trades Per Day
+input int                  InpMaxTradesPerDay       = 100;                 // Hard Cap: Max Trades Per Day (Continuous Scalping)
 input int                  InpMaxConsecutiveLosses  = 3;                   // Consecutive Losses Pause Trigger
 input int                  InpAuditIntervalSec      = 30;                  // Open Position Risk Audit Interval (sec)
 input bool                 InpAutoCutOversized      = false;               // Auto-close/cut oversized positions
 
-//--- Input Parameters: Prop Firm Rule Toggles
-input group "=== Prop Firm Rule Toggles ==="
-input bool                 InpNoMartingale          = true;                // Prohibit Martingale (no lot increase after loss)
-input bool                 InpNoGridAveraging       = true;                // Prohibit Grid / Averaging down in drawdown
-input bool                 InpNoHedging             = true;                // Prohibit Simultaneous Buy & Sell on same symbol
+//--- Input Parameters: Retail Trading & Risk Toggles
+input group "=== Retail Trading & Risk Toggles ==="
+input bool                 InpNoMartingale          = false;               // Prohibit Martingale (Disabled for independent retail risk-based sizing)
+input bool                 InpNoGridAveraging       = false;               // Prohibit Grid / Averaging down (Disabled for retail flexibility)
+input bool                 InpNoHedging             = false;               // Prohibit Simultaneous Buy & Sell (Disabled: retail hedging permitted)
 input bool                 InpRequireSL             = true;                // Require Stop Loss on every order strictly
-input int                  InpMinTradeDurationSec   = 60;                  // Minimum Trade Duration in seconds (Tick scalping ban)
-input bool                 InpNoWeekendHolding      = true;                // Close positions before Friday market close
-input int                  InpWeekendCloseHourFriday= 21;                  // Friday close hour (e.g. 21:00 or 22:00)
-input bool                 InpNewsFilterEnabled     = true;                // Enable High-Impact Economic News Blackout
-input int                  InpNewsBlockMinutesBefore= 15;                  // Minutes to block before news
-input int                  InpNewsBlockMinutesAfter = 15;                  // Minutes to block after news
-input bool                 InpForbidTickScalping    = true;                // Block ultra-short latency scalping
+input int                  InpMinTradeDurationSec   = 0;                   // Minimum Trade Duration in seconds (0 = Retail scalping unrestricted)
+input bool                 InpNoWeekendHolding      = false;               // Close positions before Friday market close (Disabled for retail)
+input int                  InpWeekendCloseHourFriday= 22;                  // Friday close hour (e.g. 21:00 or 22:00)
+input bool                 InpNewsFilterEnabled     = false;               // News Filter Permanently Disabled (Continuous Scalping)
+input int                  InpNewsBlockMinutesBefore= 0;                   // Minutes to block before news (Disabled)
+input int                  InpNewsBlockMinutesAfter = 0;                   // Minutes to block after news (Disabled)
+input bool                 InpForbidTickScalping    = false;               // Allow low-latency continuous scalping
 
 //--- Input Parameters: Warm-Up, History & Signal Timing
 input group "=== Startup Warm-Up, History & Signal Timing ==="
@@ -150,7 +150,7 @@ enum ENUM_SHORT_HISTORY_ACTION
    SHORT_HIST_REDUCE      = 1, // REDUCE (Auto-continue with available bars, flagged REDUCED_HISTORY)
    SHORT_HIST_BLOCK       = 2  // BLOCK_SYMBOL (Block this symbol, reason logged)
 };
-input ENUM_SHORT_HISTORY_ACTION InpOnShortHistory  = SHORT_HIST_ASK; // Action on short history (>= hard floor)
+input ENUM_SHORT_HISTORY_ACTION InpOnShortHistory  = SHORT_HIST_REDUCE; // Action on short history (>= hard floor, auto-continue in REDUCED_HISTORY)
 input int                 InpMaxStartupRounds      = 6;           // Max startup checklist retry rounds
 input int                 InpAlertCooldownMin      = 15;          // Alert deduplication cooldown (minutes)
 input string              InpSymbolsToMonitor      = "";          // Extra symbols to monitor (comma-separated)
@@ -173,9 +173,9 @@ input bool                InpAlertOnSignal         = true;        // Show MT5 Al
 
 //--- Input Parameters: Dynamic Spread Filter (replaces fixed InpMaxSpreadPoints)
 input group "=== Dynamic Spread Filter ==="
-input double              InpMaxSpreadPctOfSL      = 5.0;         // Max spread as % of SL distance
-input double              InpMaxSpreadAbsPoints    = 2000.0;      // Absolute spread ceiling in points (for BTCUSD.m)
-input double              InpMaxSpreadPctOfATR     = 15.0;        // Max spread as % of ATR (for SCALP / no-SL)
+input double              InpMaxSpreadPctOfSL      = 35.0;        // Max spread as % of SL distance (Configurable permissive scalping default)
+input double              InpMaxSpreadAbsPoints    = 2500.0;      // Absolute spread ceiling in points (for BTCUSD.m)
+input double              InpMaxSpreadPctOfATR     = 35.0;        // Max spread as % of ATR (for SCALP / dynamic SL)
 input int                 InpSpreadATRPeriod       = 14;          // ATR Period for spread filter
 input ENUM_TIMEFRAMES     InpSpreadATRTimeframe    = PERIOD_M15;  // ATR Timeframe for spread filter
 
@@ -337,6 +337,7 @@ void   SendTelegramFallbackAlert(const string message);
 string ExtractJsonString(const string json, const string key, const string def_val = "");
 double ExtractJsonDouble(const string json, const string key, const double def_val = 0.0);
 long   ExtractJsonInteger(const string json, const string key, const long def_val = 0);
+string ResolveBrokerSymbol(const string symbol);
 string FormatRatesJson(const string symbol, const string tf_str, const int count, const string req_id = "");
 ENUM_TIMEFRAMES StringToTimeframe(const string tf_str);
 
@@ -1161,9 +1162,6 @@ void EvaluateClosedBarSetup(const datetime closed_bar_time)
    double test_sl_dist = (mode == MODE_SCALP ? (atr_m5_pts * InpScalpSL_ATRMult * pt) : (atr_h1_pts * InpHoldSL_ATRMult * pt));
    bool spread_pass = ValidateSpreadFilter(_Symbol, closed_price, closed_price - test_sl_dist, mode, spread_msg);
 
-   string news_details = "";
-   bool news_pass = !IsNewsBlackoutActive(_Symbol, news_details);
-
    bool hours_pass = true;
    if(InpNoWeekendHolding)
    {
@@ -1177,20 +1175,13 @@ void EvaluateClosedBarSetup(const datetime closed_bar_time)
    double dd_pct = (g_peak_equity > 0 ? (g_peak_equity - cur_eq) / g_peak_equity * 100.0 : 0.0);
 
    LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
-            StringFormat("Filter results: Spread=%s (%s), News=%s%s, Hours=%s, RiskLimits=%s (DailyLoss=%.2f%%, DD=%.2f%%)",
+            StringFormat("Filter results: Spread=%s (%s), Hours=%s, RiskLimits=%s (DailyLoss=%.2f%%, DD=%.2f%%)",
                          spread_pass ? "PASS" : "FAIL", spread_pass ? "OK" : spread_msg,
-                         news_pass ? "PASS" : "BLOCKED", news_pass ? "" : " [" + news_details + "]",
                          hours_pass ? "PASS" : "WEEKEND_CLOSE",
                          risk_pass ? "PASS" : "HALTED",
                          g_daily_loss, dd_pct));
 
    // Outcome lines: Exactly one outcome line per closed bar evaluation
-   if(!news_pass)
-   {
-      LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
-               StringFormat("TRADE SKIPPED: NEWS_BLACKOUT | Event within %d min [%s]", InpNewsBlockMinutesBefore, news_details));
-      return;
-   }
    if(!hours_pass)
    {
       LogEvent("DECISION", _Symbol, EnumToString(InpSignalTimeframe),
@@ -1963,7 +1954,9 @@ string ProcessCommand(const string json)
    // 2c. CALC_PROFIT
    if(action == "CALC_PROFIT")
    {
-      string sym = ExtractJsonString(json, "symbol", _Symbol);
+      string raw_sym = ExtractJsonString(json, "symbol", _Symbol);
+      string sym = ResolveBrokerSymbol(raw_sym);
+      if(sym == "") sym = raw_sym;
       string type_str = ExtractJsonString(json, "type", "BUY");
       double vol = ExtractJsonDouble(json, "volume", 0.01);
       double p_open = ExtractJsonDouble(json, "price_open", 0.0);
@@ -1978,7 +1971,9 @@ string ProcessCommand(const string json)
    // 2d. CALC_MARGIN
    if(action == "CALC_MARGIN")
    {
-      string sym = ExtractJsonString(json, "symbol", _Symbol);
+      string raw_sym = ExtractJsonString(json, "symbol", _Symbol);
+      string sym = ResolveBrokerSymbol(raw_sym);
+      if(sym == "") sym = raw_sym;
       string type_str = ExtractJsonString(json, "type", "BUY");
       double vol = ExtractJsonDouble(json, "volume", 0.01);
       double price = ExtractJsonDouble(json, "price", 0.0);
@@ -2010,6 +2005,12 @@ string ProcessCommand(const string json)
       g_risk_halted = false;
       g_buffer_halted = false;
       g_hard_locked_today = false;
+      for(int i = 0; i < MAX_REQ_CACHE; i++)
+      {
+         g_processed_req_ids[i] = "";
+         g_processed_req_results[i] = "";
+      }
+      g_cache_index = 0;
 
       string sym_clean = GetCleanSymbol(_Symbol);
       long log = AccountInfoInteger(ACCOUNT_LOGIN);
@@ -2103,10 +2104,11 @@ string ProcessCommand(const string json)
             int  mode_val = (int)GlobalVariableGet(StringFormat("SMC_MODE_%d", tkt));
             string mode_str = (mode_val == (int)MODE_SCALP) ? "SCALP" : ((mode_val == (int)MODE_HOLD) ? "HOLD" : "AUTO");
 
-            pos_array += StringFormat("{\"ticket\":%d,\"symbol\":\"%s\",\"type\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"current_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"magic\":%d,\"comment\":\"%s\",\"mode\":\"%s\",\"be_activated\":%s,\"partial_taken\":%s}",
+            pos_array += StringFormat("{\"ticket\":%d,\"symbol\":\"%s\",\"type\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"current_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"profit\":%.2f,\"swap\":%.2f,\"commission\":%.2f,\"magic\":%d,\"comment\":\"%s\",\"mode\":\"%s\",\"be_activated\":%s,\"partial_taken\":%s}",
                                       tkt, g_pos_info.Symbol(), type_str, g_pos_info.Volume(),
                                       g_pos_info.PriceOpen(), g_pos_info.PriceCurrent(), g_pos_info.StopLoss(),
-                                      g_pos_info.TakeProfit(), g_pos_info.Profit(), g_pos_info.Magic(), g_pos_info.Comment(),
+                                      g_pos_info.TakeProfit(), g_pos_info.Profit(), g_pos_info.Swap(), g_pos_info.Commission(),
+                                      g_pos_info.Magic(), g_pos_info.Comment(),
                                       mode_str, be_done ? "true" : "false", part_done ? "true" : "false");
          }
       }
@@ -2287,11 +2289,12 @@ string ProcessCommand(const string json)
          return err;
       }
 
-      // Symbol validation
-      string sym = ExtractJsonString(json, "symbol", _Symbol);
-      if(!SymbolSelect(sym, true))
+      // Symbol resolution & validation
+      string raw_sym = ExtractJsonString(json, "symbol", _Symbol);
+      string sym = ResolveBrokerSymbol(raw_sym);
+      if(sym == "" || !SymbolSelect(sym, true))
       {
-         string err = StringFormat("{\"status\":\"ERROR\",\"message\":\"Symbol '%s' cannot be selected in Market Watch\"}", sym);
+         string err = StringFormat("{\"status\":\"ERROR\",\"message\":\"Symbol '%s' cannot be selected in Market Watch\",\"requested_symbol\":\"%s\"}", raw_sym, raw_sym);
          if(req_id != "") CacheRequestResult(req_id, err);
          return err;
       }
@@ -2757,6 +2760,28 @@ string ProcessCommand(const string json)
       return "{\"status\":\"SUCCESS\",\"message\":\"Trading explicitly DISABLED\",\"trading_enabled\":false}";
    }
 
+   // 11. ENABLE (Authorize Trading on LIVE / PROP)
+   if(action == "ENABLE")
+   {
+      g_trading_enabled = true;
+      GlobalVariableSet("SMC_ENABLED_" + IntegerToString(InpMagicNumber) + "_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)), 1.0);
+      Print("[PythonBridgeEA] [COMMAND] Trading explicitly ENABLED via command.");
+      NotifyUser("Trading explicitly ENABLED.");
+      UpdateDashboardVisuals();
+      return "{\"status\":\"SUCCESS\",\"message\":\"Trading explicitly ENABLED\",\"trading_enabled\":true}";
+   }
+
+   // 12. DISABLE (Halt Trading on LIVE / PROP)
+   if(action == "DISABLE")
+   {
+      g_trading_enabled = false;
+      GlobalVariableSet("SMC_ENABLED_" + IntegerToString(InpMagicNumber) + "_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)), 0.0);
+      Print("[PythonBridgeEA] [COMMAND] Trading explicitly DISABLED via command.");
+      NotifyUser("Trading explicitly DISABLED.");
+      UpdateDashboardVisuals();
+      return "{\"status\":\"SUCCESS\",\"message\":\"Trading explicitly DISABLED\",\"trading_enabled\":false}";
+   }
+
    return StringFormat("{\"status\":\"ERROR\",\"message\":\"Unknown command '%s'\"}", action);
 }
 
@@ -2936,6 +2961,8 @@ void CheckScalpTimeStop(const ulong ticket, const datetime open_time, const ENUM
 //| Classify Adaptive Mode: SCALP vs HOLD                            |
 //| Computes from MEASURED values (Spread, ATR M5/H1, ADX M5)        |
 //+------------------------------------------------------------------+
+//| Classifies Mode: SCALP vs HOLD (measured per-symbol indicators)  |
+//+------------------------------------------------------------------+
 ENUM_STRATEGY_MODE ClassifyAdaptiveMode(const string sym, string &decision_reason)
 {
    double atr_m5_val[];
@@ -2945,14 +2972,24 @@ ENUM_STRATEGY_MODE ClassifyAdaptiveMode(const string sym, string &decision_reaso
    ArraySetAsSeries(atr_h1_val, true);
    ArraySetAsSeries(adx_val, true);
 
-   bool has_atr_m5 = (g_atr_handle_m5 != INVALID_HANDLE && CopyBuffer(g_atr_handle_m5, 0, 0, 1, atr_m5_val) > 0);
-   bool has_atr_h1 = (g_atr_handle_h1 != INVALID_HANDLE && CopyBuffer(g_atr_handle_h1, 0, 0, 1, atr_h1_val) > 0);
-   bool has_adx    = (g_adx_handle_m5 != INVALID_HANDLE && CopyBuffer(g_adx_handle_m5, 0, 0, 1, adx_val) > 0);
+   int h_atr_m5 = (sym == _Symbol) ? g_atr_handle_m5 : iATR(sym, PERIOD_M5, InpATRPeriod);
+   int h_atr_h1 = (sym == _Symbol) ? g_atr_handle_h1 : iATR(sym, PERIOD_H1, InpATRPeriod);
+   int h_adx    = (sym == _Symbol) ? g_adx_handle_m5 : iADX(sym, PERIOD_M5, InpATRPeriod);
+
+   bool has_atr_m5 = (h_atr_m5 != INVALID_HANDLE && CopyBuffer(h_atr_m5, 0, 0, 1, atr_m5_val) > 0);
+   bool has_atr_h1 = (h_atr_h1 != INVALID_HANDLE && CopyBuffer(h_atr_h1, 0, 0, 1, atr_h1_val) > 0);
+   bool has_adx    = (h_adx != INVALID_HANDLE && CopyBuffer(h_adx, 0, 0, 1, adx_val) > 0);
 
    if(!has_atr_m5 || !has_adx)
    {
-      decision_reason = "Indicator buffer unavailable (ATR_M5 or ADX_M5 handle uninitialized); defaulted to HOLD";
-      return MODE_HOLD;
+      if(sym != _Symbol)
+      {
+         if(h_atr_m5 != INVALID_HANDLE) IndicatorRelease(h_atr_m5);
+         if(h_atr_h1 != INVALID_HANDLE) IndicatorRelease(h_atr_h1);
+         if(h_adx != INVALID_HANDLE) IndicatorRelease(h_adx);
+      }
+      decision_reason = "Indicator buffer unavailable (ATR_M5 or ADX_M5 handle uninitialized); defaulted to SCALP";
+      return MODE_SCALP;
    }
 
    double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
@@ -2966,16 +3003,23 @@ ENUM_STRATEGY_MODE ClassifyAdaptiveMode(const string sym, string &decision_reaso
    double adx_val_m5 = adx_val[0];
    double spread_pct_of_atr = (atr_m5_pts > 0) ? (cur_spread_pts / atr_m5_pts) * 100.0 : 100.0;
 
-   // SCALP Condition: Low spread vs M5 ATR (< 25%), strong ADX momentum (>= threshold)
-   if(spread_pct_of_atr < 25.0 && adx_val_m5 >= InpADXThreshold)
+   if(sym != _Symbol)
    {
-      decision_reason = StringFormat("Measured: Spread=%.1f pts (%.1f%% of ATR_M5 %.1f pts < 25%%) & ADX_M5=%.1f >= %.1f",
-                                     cur_spread_pts, spread_pct_of_atr, atr_m5_pts, adx_val_m5, InpADXThreshold);
+      if(h_atr_m5 != INVALID_HANDLE) IndicatorRelease(h_atr_m5);
+      if(h_atr_h1 != INVALID_HANDLE) IndicatorRelease(h_atr_h1);
+      if(h_adx != INVALID_HANDLE) IndicatorRelease(h_adx);
+   }
+
+   // SCALP Condition: Low spread vs M5 ATR (< 35%), active ADX momentum
+   if(spread_pct_of_atr < 35.0 && adx_val_m5 >= 18.0)
+   {
+      decision_reason = StringFormat("Measured: Spread=%.1f pts (%.1f%% of ATR_M5 %.1f pts < 35%%) & ADX_M5=%.1f >= 18.0",
+                                     cur_spread_pts, spread_pct_of_atr, atr_m5_pts, adx_val_m5);
       return MODE_SCALP;
    }
 
-   decision_reason = StringFormat("Measured: Spread=%.1f pts (%.1f%% of ATR_M5 %.1f pts), ADX_M5=%.1f (< %.1f), ATR_H1=%.1f pts > ATR_M5",
-                                  cur_spread_pts, spread_pct_of_atr, atr_m5_pts, adx_val_m5, InpADXThreshold, atr_h1_pts);
+   decision_reason = StringFormat("Measured: Spread=%.1f pts (%.1f%% of ATR_M5 %.1f pts), ADX_M5=%.1f, ATR_H1=%.1f pts (Intraday Hold preferred)",
+                                  cur_spread_pts, spread_pct_of_atr, atr_m5_pts, adx_val_m5, atr_h1_pts);
    return MODE_HOLD;
 }
 
@@ -3313,47 +3357,11 @@ void EvaluateRealTimeRisk()
 }
 
 //+------------------------------------------------------------------+
-//| High-Impact Economic News Blackout Check (MQL5 Calendar API)     |
+//| Economic News Blackout Check (Disabled for Continuous Scalping)  |
 //+------------------------------------------------------------------+
 bool IsNewsBlackoutActive(const string sym, string &news_details)
 {
-   if(!InpNewsFilterEnabled) return false;
-
-   string baseCurr   = SymbolInfoString(sym, SYMBOL_CURRENCY_BASE);
-   string profitCurr = SymbolInfoString(sym, SYMBOL_CURRENCY_PROFIT);
-
-   datetime now_server = TimeTradeServer();
-   datetime from_time  = now_server - (InpNewsBlockMinutesAfter * 60);
-   datetime to_time    = now_server + (InpNewsBlockMinutesBefore * 60);
-
-   string currencies[2];
-   currencies[0] = baseCurr;
-   currencies[1] = profitCurr;
-
-   for(int c = 0; c < 2; c++)
-   {
-      if(currencies[c] == "") continue;
-      MqlCalendarValue values[];
-      ResetLastError();
-      int count = CalendarValueHistory(values, from_time, to_time, NULL, currencies[c]);
-      if(count <= 0) continue;
-
-      for(int i = 0; i < count; i++)
-      {
-         MqlCalendarEvent event;
-         if(CalendarEventById(values[i].event_id, event))
-         {
-            if(event.time_mode != CALENDAR_TIMEMODE_DATETIME) continue;
-            if(event.importance == CALENDAR_IMPORTANCE_HIGH)
-            {
-               news_details = StringFormat("High-Impact News: [%s] %s @ %s",
-                                           currencies[c], event.name,
-                                           TimeToString(values[i].time, TIME_MINUTES));
-               return true;
-            }
-         }
-      }
-   }
+   news_details = "";
    return false;
 }
 
@@ -3520,14 +3528,6 @@ bool ValidatePreTrade(const string sym, const double volume, const double sl, co
          reason = StringFormat("Prop Rule Violation: Weekend holding prohibited after %02d:00 Friday.", InpWeekendCloseHourFriday);
          return false;
       }
-   }
-
-   // 12. Economic News Filter
-   string news_info = "";
-   if(IsNewsBlackoutActive(sym, news_info))
-   {
-      reason = StringFormat("News Filter: Trading suspended around %s", news_info);
-      return false;
    }
 
    return true;
@@ -3709,12 +3709,16 @@ void ConfigureFillingMode(const string sym)
 //+------------------------------------------------------------------+
 bool IsDuplicateRequest(const string req_id, string &cached_result)
 {
+   if(req_id == "") return false;
    for(int i = 0; i < MAX_REQ_CACHE; i++)
    {
       if(g_processed_req_ids[i] == req_id)
       {
-         cached_result = g_processed_req_results[i];
-         return true;
+         if(StringFind(g_processed_req_results[i], "SUCCESS") >= 0)
+         {
+            cached_result = g_processed_req_results[i];
+            return true;
+         }
       }
    }
    return false;
@@ -3902,25 +3906,124 @@ long ExtractJsonInteger(const string json, const string key, const long def_val)
 }
 
 //+------------------------------------------------------------------+
+//| Resolve broker symbol suffix (.m, m, .pro, _ecn, etc.) safely    |
+//| Enumerate broker symbols dynamically, avoiding ambiguous collisions|
+//+------------------------------------------------------------------+
+string ResolveBrokerSymbol(const string symbol)
+{
+   if(symbol == "") return "";
+
+   // 1. Check direct match first
+   if(SymbolSelect(symbol, true))
+      return symbol;
+
+   // 2. Normalize root symbol: strip known broker suffixes or prefixes
+   string root = symbol;
+   string known_suffixes[] = {".m", ".pro", ".ecn", "_ecn", ".std", ".raw", ".a", ".r", ".c", ".i", "m", "+", "#"};
+   int n_suffixes = ArraySize(known_suffixes);
+
+   for(int i = 0; i < n_suffixes; i++)
+   {
+      string sfx = known_suffixes[i];
+      int sfx_len = StringLen(sfx);
+      int sym_len = StringLen(root);
+      if(sym_len > sfx_len && StringSubstr(root, sym_len - sfx_len) == sfx)
+      {
+         root = StringSubstr(root, 0, sym_len - sfx_len);
+         break;
+      }
+   }
+
+   // 3. Fast-check standard suffix variations against root
+   for(int i = 0; i < n_suffixes; i++)
+   {
+      string candidate = root + known_suffixes[i];
+      if(SymbolSelect(candidate, true))
+         return candidate;
+   }
+
+   // Also test bare root
+   if(SymbolSelect(root, true))
+      return root;
+
+   // 4. Dynamic enumeration across all symbols available in the MT5 terminal
+   int total_symbols = SymbolsTotal(false);
+   string best_match = "";
+   int match_count = 0;
+
+   for(int i = 0; i < total_symbols; i++)
+   {
+      string s_name = SymbolName(i, false);
+      // Check if s_name starts with root or has root as primary identifier
+      int find_pos = StringFind(s_name, root);
+      if(find_pos >= 0)
+      {
+         // Verify it's either an exact match, prefix match or suffix match
+         int root_len = StringLen(root);
+         int s_len = StringLen(s_name);
+         bool valid_candidate = false;
+
+         if(s_len == root_len) valid_candidate = true;
+         else if(find_pos == 0) // starts with root (e.g. XAUUSD.m, XAUUSD_pro)
+         {
+            // Make sure the next character is a separator or short suffix, not another pair (e.g. XAUUSDT)
+            ushort next_char = StringGetCharacter(s_name, root_len);
+            if(next_char == '.' || next_char == '_' || next_char == '-' || next_char == 'm' || next_char == 'a' || next_char == '+')
+               valid_candidate = true;
+         }
+         else if(find_pos + root_len == s_len) // ends with root (e.g. pro.XAUUSD)
+         {
+            ushort prev_char = StringGetCharacter(s_name, find_pos - 1);
+            if(prev_char == '.' || prev_char == '_' || prev_char == '-')
+               valid_candidate = true;
+         }
+
+         if(valid_candidate)
+         {
+            match_count++;
+            best_match = s_name;
+            // If exact standard suffix like .m or .std, prefer and break early
+            if(s_name == root + ".m" || s_name == root + ".std" || s_name == root + ".pro")
+            {
+               match_count = 1;
+               break;
+            }
+         }
+      }
+   }
+
+   // If exactly one clean match found, select it in Market Watch and return
+   if(match_count == 1 && best_match != "")
+   {
+      if(SymbolSelect(best_match, true))
+         return best_match;
+   }
+
+   return "";
+}
+
+//+------------------------------------------------------------------+
 //| Format historical rates into JSON array                          |
 //| Concurrently computes UTC timestamps using broker_utc_offset     |
 //+------------------------------------------------------------------+
 string FormatRatesJson(const string symbol, const string tf_str, const int count, const string req_id)
 {
-   if(!SymbolSelect(symbol, true))
+   string resolved_sym = ResolveBrokerSymbol(symbol);
+   if(resolved_sym == "")
    {
       return StringFormat("{\"status\":\"ERROR\",\"request_id\":\"%s\",\"message\":\"Symbol '%s' cannot be selected\"}", req_id, symbol);
    }
 
    ENUM_TIMEFRAMES tf = StringToTimeframe(tf_str);
    MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   int copied = CopyRates(symbol, tf, 0, count, rates);
+   ArraySetAsSeries(rates, false);
+   int req_bars = (count > 0) ? count + 1 : 101;
+   int copied = CopyRates(resolved_sym, tf, 0, req_bars, rates);
 
    if(copied <= 0)
    {
       return StringFormat("{\"status\":\"ERROR\",\"request_id\":\"%s\",\"message\":\"CopyRates failed for %s on %s (code %d)\"}",
-                          req_id, symbol, tf_str, GetLastError());
+                          req_id, resolved_sym, tf_str, GetLastError());
    }
 
    string json_rates = "[";
@@ -3929,14 +4032,15 @@ string FormatRatesJson(const string symbol, const string tf_str, const int count
       if(i > 0) json_rates += ",";
       int candle_time = (int)rates[i].time;
       int candle_utc  = candle_time - g_broker_utc_offset;
-      json_rates += StringFormat("{\"time\":%d,\"time_utc\":%d,\"open\":%.5f,\"high\":%.5f,\"low\":%.5f,\"close\":%.5f,\"tick_volume\":%d,\"spread\":%d}",
+      bool is_complete = (i < copied - 1);
+      json_rates += StringFormat("{\"time\":%d,\"time_utc\":%d,\"open\":%.5f,\"high\":%.5f,\"low\":%.5f,\"close\":%.5f,\"tick_volume\":%d,\"spread\":%d,\"complete\":%s}",
                                  candle_time, candle_utc, rates[i].open, rates[i].high, rates[i].low, rates[i].close,
-                                 rates[i].tick_volume, rates[i].spread);
+                                 rates[i].tick_volume, rates[i].spread, is_complete ? "true" : "false");
    }
    json_rates += "]";
 
-   return StringFormat("{\"status\":\"SUCCESS\",\"request_id\":\"%s\",\"symbol\":\"%s\",\"timeframe\":\"%s\",\"count\":%d,\"broker_utc_offset\":%d,\"data\":%s}",
-                       req_id, symbol, tf_str, copied, g_broker_utc_offset, json_rates);
+   return StringFormat("{\"status\":\"SUCCESS\",\"request_id\":\"%s\",\"symbol\":\"%s\",\"broker_symbol\":\"%s\",\"timeframe\":\"%s\",\"count\":%d,\"broker_utc_offset\":%d,\"data\":%s}",
+                       req_id, symbol, resolved_sym, tf_str, copied, g_broker_utc_offset, json_rates);
 }
 
 //+------------------------------------------------------------------+
@@ -3948,6 +4052,7 @@ ENUM_TIMEFRAMES StringToTimeframe(const string tf_str)
    if(tf_str == "D1")  return PERIOD_D1;
    if(tf_str == "H4")  return PERIOD_H4;
    if(tf_str == "H1")  return PERIOD_H1;
+   if(tf_str == "M30") return PERIOD_M30;
    if(tf_str == "M15") return PERIOD_M15;
    if(tf_str == "M5")  return PERIOD_M5;
    if(tf_str == "M1")  return PERIOD_M1;
@@ -4281,18 +4386,20 @@ string FormatSymbolStatusJson(const string req_id)
       int cur_spread_pts = (int)SymbolInfoInteger(s, SYMBOL_SPREAD);
       double spread_money = (cur_spread_pts * pt / tick_sz) * tick_val * min_lot;
 
-      // 1x ATR on M15
+      // 1x ATR on M5 (measured per-symbol)
       double atr_arr[];
       ArraySetAsSeries(atr_arr, true);
       double atr_pts = 0.0;
       double atr_money = 0.0;
-      if(s == _Symbol && g_atr_handle_m5 != INVALID_HANDLE)
+      int sym_atr_handle = (s == _Symbol) ? g_atr_handle_m5 : iATR(s, PERIOD_M5, InpATRPeriod);
+      if(sym_atr_handle != INVALID_HANDLE)
       {
-         if(CopyBuffer(g_atr_handle_m5, 0, 1, 1, atr_arr) > 0)
+         if(CopyBuffer(sym_atr_handle, 0, 1, 1, atr_arr) > 0)
          {
             atr_pts = atr_arr[0] / pt;
             atr_money = (atr_pts * pt / tick_sz) * tick_val * min_lot;
          }
+         if(s != _Symbol) IndicatorRelease(sym_atr_handle);
       }
       if(atr_pts <= 0.0)
       {

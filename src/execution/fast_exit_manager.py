@@ -135,7 +135,7 @@ class FastTickExitManager:
         current_r = profit_dist / sl_dist
 
         # ------------------------------------------------------------------
-        # 1. Pre-Rollover / Pre-News / Session-End Flatten
+        # 1. Pre-Rollover / Session-End Flatten (News flatten completely removed)
         # ------------------------------------------------------------------
         if exit_cfg.get("flatten_before_rollover", True) and is_pre_rollover:
             act = FastExitAction(
@@ -143,17 +143,6 @@ class FastTickExitManager:
                 symbol=pos.symbol,
                 action_type="FULL_CLOSE",
                 reason="Pre-rollover swap blackout flatten",
-                close_volume=pos.volume
-            )
-            self._emit_trade_event(pos.symbol, pos.ticket, act.action_type, act.reason)
-            return [act]
-
-        if exit_cfg.get("flatten_before_high_impact_news", True) and is_pre_news:
-            act = FastExitAction(
-                ticket=pos.ticket,
-                symbol=pos.symbol,
-                action_type="FULL_CLOSE",
-                reason="Pre-high-impact news protective flatten",
                 close_volume=pos.volume
             )
             self._emit_trade_event(pos.symbol, pos.ticket, act.action_type, act.reason)

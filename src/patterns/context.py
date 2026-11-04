@@ -207,16 +207,13 @@ class PatternContextEngine:
                 vol_score = vol_max * 0.5
             breakdown["volume_momentum"] = round(vol_score, 1)
 
-            # --- F. VOLATILITY, SESSION & NEWS (Max 5) ---
+            # --- F. VOLATILITY & SESSION REGIME (Max 5; news blocking removed) ---
             regime_score = 0.0
             regime_max = self.weights.get("volatility_session_regime", 5.0)
             if is_in_killzone:
                 regime_score += 3.0
                 reasons.append("Active institutional Killzone (London/NY)")
-            if news_safe:
-                regime_score += 2.0
-            else:
-                rejection_reasons.append("High-impact news blackout active")
+            regime_score += 2.0
             regime_score = min(regime_max, regime_score)
             breakdown["regime_news"] = round(regime_score, 1)
 

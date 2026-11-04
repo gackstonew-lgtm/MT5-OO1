@@ -27,6 +27,20 @@ logging.basicConfig(
 logger = logging.getLogger("BridgeServer")
 
 
+def make_exclusive_server_socket() -> socket.socket:
+    """
+    Creates a TCP listening socket that refuses to share its port with another process.
+    Windows: SO_EXCLUSIVEADDRUSE (SO_REUSEADDR there permits duplicate binds -> split traffic).
+    POSIX:   SO_REUSEADDR only allows rebinding over TIME_WAIT, which is safe.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if sys.platform.startswith("win") and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    return s
+
+
 class PersistentBridgeServer:
     def __init__(
         self,
@@ -69,17 +83,19 @@ class PersistentBridgeServer:
         """Starts both EA server (5555) and IPC command server (5556)."""
         self._is_running = True
 
-        # 1. Start EA listener on 5555
-        self._ea_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._ea_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # 1. Start EA listener on 5555.
+        # Exclusive bind: on Windows, SO_REUSEADDR lets several bridge processes bind the SAME port,
+        # and the OS then distributes connections between them. A second server without the EA attached
+        # silently swallows IPC requests, which surfaced as "IPC error: timed out". Bind exclusively so a
+        # duplicate instance fails fast instead of splitting traffic.
+        self._ea_server_socket = make_exclusive_server_socket()
         self._ea_server_socket.bind((self.ea_host, self.ea_port))
         self._ea_server_socket.listen(5)
         self._ea_server_socket.settimeout(1.0)
         logger.info(f"EA Bridge Listener bound to {self.ea_host}:{self.ea_port} (Awaiting MT5 EA...)")
 
         # 2. Start IPC listener on 5556
-        self._ipc_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._ipc_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._ipc_server_socket = make_exclusive_server_socket()
         self._ipc_server_socket.bind((self.ipc_host, self.ipc_port))
         self._ipc_server_socket.listen(10)
         self._ipc_server_socket.settimeout(1.0)

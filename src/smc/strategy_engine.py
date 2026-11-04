@@ -129,6 +129,9 @@ class SmcStrategyEngine:
             if asia_range:
                 asia_sweep = self.session_liq_engine.detect_london_asia_sweep(symbol, m15_candles, asia_range, pip_size=self.pip_size)
 
+        # Check for recent M15 Swing / Equal-High / Equal-Low liquidity sweep with rejection
+        m15_ssl_sweep, m15_bsl_sweep = self._detect_recent_swing_sweep(m15_candles)
+
         # ------------------------------------------------------------------
         # Setup 1: BULLISH OPPORTUNITIES (Reversals & Continuations)
         # ------------------------------------------------------------------
@@ -153,6 +156,16 @@ class SmcStrategyEngine:
         elif asia_sweep and asia_sweep.direction_bias == OrderType.BUY:
             bullish_setup_type = SetupType.SESSION_SWEEP
             related_level = "ASIA_LOW_SWEEP"
+        elif m15_ssl_sweep and any(e.direction == OrderType.BUY for e in m15_events):
+            bullish_setup_type = SetupType.DAILY_REVERSAL
+            related_level = "M15_SSL_SWEEP"
+        elif (
+            mtf_ctx.h1.trend in [TrendBias.STRONG_BULLISH, TrendBias.WEAK_BULLISH]
+            and (active_bullish_fvgs or active_bullish_obs)
+            and any(e.direction == OrderType.BUY for e in m15_events)
+        ):
+            bullish_setup_type = SetupType.M15_SMC_OTE
+            related_level = "H1_M15_CONTINUATION"
 
         if bullish_setup_type is not None:
             candidate = self._evaluate_bullish_candidate(
@@ -194,6 +207,16 @@ class SmcStrategyEngine:
         elif asia_sweep and asia_sweep.direction_bias == OrderType.SELL:
             bearish_setup_type = SetupType.SESSION_SWEEP
             bear_related_level = "ASIA_HIGH_SWEEP"
+        elif m15_bsl_sweep and any(e.direction == OrderType.SELL for e in m15_events):
+            bearish_setup_type = SetupType.DAILY_REVERSAL
+            bear_related_level = "M15_BSL_SWEEP"
+        elif (
+            mtf_ctx.h1.trend in [TrendBias.STRONG_BEARISH, TrendBias.WEAK_BEARISH]
+            and (active_bearish_fvgs or active_bearish_obs)
+            and any(e.direction == OrderType.SELL for e in m15_events)
+        ):
+            bearish_setup_type = SetupType.M15_SMC_OTE
+            bear_related_level = "H1_M15_CONTINUATION"
 
         if bearish_setup_type is not None:
             candidate = self._evaluate_bearish_candidate(
@@ -338,6 +361,11 @@ class SmcStrategyEngine:
                 sl_distance = entry_price - stop_loss
                 if sl_distance > 0:
                     rr = (target_price - entry_price) / sl_distance
+                    # Re-anchor the target if the structural stop widened the risk
+                    # and pushed reward-to-risk below the mandatory minimum.
+                    if rr < self.min_rr:
+                        target_price = entry_price + (self.min_rr * sl_distance)
+                        rr = self.min_rr
 
         # Scoring
         score, reasons, rejection_reasons = self._score_setup(
@@ -353,7 +381,7 @@ class SmcStrategyEngine:
         )
         rejection_reasons.extend(rejection_reasons_init)
 
-        status = "APPROVED" if score >= self.min_score and rr >= self.min_rr and not rejection_reasons else "REJECTED"
+        status = "APPROVED" if score >= self.min_score and rr >= self.min_rr - 1e-9 and not rejection_reasons else "REJECTED"
 
         return SignalCandidate(
             id=f"{symbol}_BUY_{current_candle.time.isoformat()}",
@@ -443,6 +471,9 @@ class SmcStrategyEngine:
                 sl_distance = stop_loss - entry_price
                 if sl_distance > 0:
                     rr = (entry_price - target_price) / sl_distance
+                    if rr < self.min_rr:
+                        target_price = entry_price - (self.min_rr * sl_distance)
+                        rr = self.min_rr
 
         score, reasons, rejection_reasons = self._score_setup(
             direction=OrderType.SELL,
@@ -457,7 +488,7 @@ class SmcStrategyEngine:
         )
         rejection_reasons.extend(rejection_reasons_init)
 
-        status = "APPROVED" if score >= self.min_score and rr >= self.min_rr and not rejection_reasons else "REJECTED"
+        status = "APPROVED" if score >= self.min_score and rr >= self.min_rr - 1e-9 and not rejection_reasons else "REJECTED"
 
         return SignalCandidate(
             id=f"{symbol}_SELL_{current_candle.time.isoformat()}",
@@ -560,11 +591,96 @@ class SmcStrategyEngine:
             score += 5
             reasons.append("Formed within London or New York Kill Zone (+5)")
 
+        # 10. Higher-Timeframe Conflict Check (protect against trading into opposing H4+D1 trend)
+        h4_opposes = (
+            (is_bullish and mtf_ctx.h4.trend in [TrendBias.STRONG_BEARISH, TrendBias.WEAK_BEARISH])
+            or (not is_bullish and mtf_ctx.h4.trend in [TrendBias.STRONG_BULLISH, TrendBias.WEAK_BULLISH])
+        )
+        d1_opposes = (
+            (is_bullish and mtf_ctx.d1.trend in [TrendBias.STRONG_BEARISH, TrendBias.WEAK_BEARISH])
+            or (not is_bullish and mtf_ctx.d1.trend in [TrendBias.STRONG_BULLISH, TrendBias.WEAK_BULLISH])
+        )
+        if setup_type not in [SetupType.WEEKLY_REVERSAL, SetupType.DAILY_REVERSAL] and h4_opposes and d1_opposes:
+            rejection_reasons.append(
+                f"HTF_CONFLICT: Higher-timeframe bias (D1={mtf_ctx.d1.trend.value}, H4={mtf_ctx.h4.trend.value}) opposes {direction.value} setup"
+            )
+
         # Mandatory Hard Filters
-        if rr < self.min_rr:
+        if rr < self.min_rr - 1e-9:
             rejection_reasons.append(f"Reward-to-risk {rr:.2f} is below mandatory threshold {self.min_rr:.2f}")
 
         if score < self.min_score:
             rejection_reasons.append(f"Confluence score {score:.1f} is below minimum {self.min_score:.1f}")
 
-        return score, reasons, rejection_reasons
+        return min(100.0, score), reasons, rejection_reasons
+
+    def _detect_recent_swing_sweep(self, candles: List[Candle]) -> Tuple[bool, bool]:
+        """
+        Detects whether recent closed candles swept prior M15 swing low (SSL sweep -> bullish)
+        or prior M15 swing high (BSL sweep -> bearish) and rejected back inside range.
+        Returns (ssl_swept_bullish, bsl_swept_bearish).
+        """
+        if len(candles) < 15:
+            return False, False
+        prior = candles[:-3]
+        recent = candles[-3:]
+        prior_low = min(c.low for c in prior[-20:])
+        prior_high = max(c.high for c in prior[-20:])
+        ssl_sweep = any(c.low < prior_low and c.close > prior_low for c in recent) or (
+            min(c.low for c in recent) < prior_low and recent[-1].close > prior_low
+        )
+        bsl_sweep = any(c.high > prior_high and c.close < prior_high for c in recent) or (
+            max(c.high for c in recent) > prior_high and recent[-1].close < prior_high
+        )
+        return ssl_sweep, bsl_sweep
+
+    @staticmethod
+    def calculate_atr(candles: List[Candle], period: int = 14) -> float:
+        """Calculates Average True Range (ATR) on closed candles."""
+        if not candles:
+            return 0.0
+        if len(candles) < 2:
+            return candles[-1].range
+        trs: List[float] = []
+        for i in range(1, len(candles)):
+            h = candles[i].high
+            l = candles[i].low
+            pc = candles[i - 1].close
+            tr = max(h - l, abs(h - pc), abs(l - pc))
+            trs.append(tr)
+        window = trs[-period:] if len(trs) >= period else trs
+        return sum(window) / len(window) if window else 0.0
+
+    @staticmethod
+    def calculate_adx(candles: List[Candle], period: int = 14) -> float:
+        """Calculates Average Directional Index (ADX) on closed candles."""
+        if len(candles) < period + 2:
+            return 20.0
+        plus_dm_list: List[float] = []
+        minus_dm_list: List[float] = []
+        tr_list: List[float] = []
+        for i in range(1, len(candles)):
+            up_move = candles[i].high - candles[i - 1].high
+            down_move = candles[i - 1].low - candles[i].low
+            plus_dm = up_move if (up_move > down_move and up_move > 0) else 0.0
+            minus_dm = down_move if (down_move > up_move and down_move > 0) else 0.0
+            tr = max(
+                candles[i].high - candles[i].low,
+                abs(candles[i].high - candles[i - 1].close),
+                abs(candles[i].low - candles[i - 1].close),
+            )
+            plus_dm_list.append(plus_dm)
+            minus_dm_list.append(minus_dm)
+            tr_list.append(tr)
+        dx_values: List[float] = []
+        start_idx = max(0, len(tr_list) - period * 2)
+        for j in range(start_idx + period, len(tr_list) + 1):
+            tr_sum = sum(tr_list[j - period : j])
+            if tr_sum <= 1e-12:
+                continue
+            p_di = 100.0 * sum(plus_dm_list[j - period : j]) / tr_sum
+            m_di = 100.0 * sum(minus_dm_list[j - period : j]) / tr_sum
+            denom = p_di + m_di
+            if denom > 1e-12:
+                dx_values.append(100.0 * abs(p_di - m_di) / denom)
+        return sum(dx_values[-period:]) / len(dx_values[-period:]) if dx_values else 20.0

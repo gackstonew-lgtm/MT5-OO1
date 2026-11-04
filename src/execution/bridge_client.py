@@ -100,7 +100,12 @@ class BridgeClient:
 
             try:
                 self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # Exclusive bind (see bridge_server.make_exclusive_server_socket): never co-listen with the
+                # persistent daemon on Windows, otherwise EA/IPC traffic is split and requests time out.
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                else:
+                    self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self._server_socket.bind((self.host, self.port))
                 self._server_socket.listen(5)
                 self._server_socket.settimeout(1.0)
@@ -230,7 +235,15 @@ class BridgeClient:
         # 1. If direct mode is connected locally on this instance, use direct socket
         if not (self._connected and self._client_socket):
             if self.ipc_port is not None:
-                ipc_res = self._send_ipc_request(payload, timeout_sec=self.timeout_ms / 1000.0 + 2.0)
+                # The daemon waits up to 12s on the EA (forward_request_to_ea). Execution actions must
+                # wait longer than that, otherwise the client reports "timed out" while MT5 is still
+                # filling the order. Info/heartbeat requests keep a short budget.
+                action = str(payload.get("action", "")).upper()
+                if action in ("TRADE", "CLOSE", "MODIFY", "CANCEL", "CLOSE_ALL"):
+                    ipc_timeout = max(15.0, self.timeout_ms / 1000.0 + 2.0)
+                else:
+                    ipc_timeout = self.timeout_ms / 1000.0 + 2.0
+                ipc_res = self._send_ipc_request(payload, timeout_sec=ipc_timeout)
                 if ipc_res is not None:
                     return ipc_res
 
@@ -355,8 +368,12 @@ class BridgeClient:
                         stop_loss=float(item.get("sl", 0.0)),
                         take_profit=float(item.get("tp", 0.0)),
                         profit=float(item.get("profit", 0.0)),
+                        swap=float(item.get("swap", 0.0)),
+                        commission=float(item.get("commission", 0.0)),
                         magic=int(item.get("magic", 100101)),
-                        comment=item.get("comment", "")
+                        comment=item.get("comment", ""),
+                        break_even_activated=bool(item.get("be_activated", False)),
+                        partial_taken=bool(item.get("partial_taken", False)),
                     )
                 )
         return positions

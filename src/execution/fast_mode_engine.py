@@ -210,9 +210,7 @@ class FastScalpEntryEngine:
         if self._evaluated_bar_times.get(symbol) == bar_time:
             return None, f"Bar {bar_time.isoformat()} already evaluated for {symbol}"
 
-        # 3. High-impact news blackout gate
-        if is_news_blackout:
-            return None, f"High-impact news blackout active for {symbol}"
+        # 3. High-impact news blackout gate removed (Continuous Scalping: news never blocks trades)
 
         # 4. Session & Affinity gate
         scalp_cfg = self._cfg.get("scalp_entry", {})

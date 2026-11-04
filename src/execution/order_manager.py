@@ -5,19 +5,23 @@ monitors slippage, prevents duplicate orders, and handles simulation mode.
 """
 
 from __future__ import annotations
+import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Any, Dict, List, Optional, Set
 
 from src.core.contracts import (
-    SignalCandidate, TradeOrder, Position, AccountInfo, SymbolInfo,
+    Candle, SignalCandidate, TradeOrder, Position, AccountInfo, SymbolInfo,
     OrderType, ExecutionMode, TradePlan, PlanAmendment
 )
 from src.core.config import AppConfig
-from src.risk.position_sizing import PositionSizingEngine, PositionSizeResult
+from src.risk.position_sizing import PositionSizingEngine
 from src.risk.portfolio_risk import PortfolioRiskEngine
-from src.risk.replay_gate import MonteCarloReplayGate, ReplayGateResult
+from src.risk.replay_gate import MonteCarloReplayGate
 from src.execution.bridge_client import BridgeClient
+
+logger = logging.getLogger("OrderManager")
 
 
 @dataclass
@@ -112,18 +116,34 @@ class OrderManager:
             if candidate.take_profit > 0 and candidate.take_profit >= candidate.entry_price:
                 rejections.append(f"Pre-check failed: Invalid stops on SELL - TP ({candidate.take_profit}) must be below entry ({candidate.entry_price}).")
 
-        # 4. Is spread acceptable? (Dynamic Spread Filter: ceiling & % of SL distance)
+        # 4. Is spread acceptable? (Adaptive Spread Filter)
         spread_pts = float(symbol_info.spread)
         pt = float(symbol_info.point) if symbol_info.point > 0 else 0.01
         sl_dist_pts = sl_distance / pt if pt > 0 else sl_distance
+        is_scalp_signal = str(getattr(candidate, "id", "")).startswith("SCALP_")
 
-        # Absolute ceiling check
-        if spread_pts > 2000.0:
-            rejections.append(f"Pre-check failed: Spread ({spread_pts:.1f} pts) exceeds absolute ceiling (2000.0 pts).")
+        # Non-scalp (SMC/day-trading) entries use the account profile's spread ceiling
+        # (default 5% of SL distance). Scalping uses the dedicated, wider risk setting.
+        profile_max_spread = float(getattr(self.portfolio_risk.profile, "max_spread_pct_of_sl", 5.0))
+        if is_scalp_signal:
+            max_spread_pct = float(getattr(self.config.risk, "max_spread_pct_of_sl_scalping", 20.0))
+        else:
+            max_spread_pct = profile_max_spread
+
+        # Absolute ceiling in points, independent of SL distance (default 2000).
+        abs_ceiling = float(getattr(self.config.risk, "max_spread_points_absolute", 2000.0))
+        if spread_pts > abs_ceiling:
+            rejections.append(
+                f"Pre-check failed: Spread ({spread_pts:.1f} pts) exceeds absolute ceiling "
+                f"({abs_ceiling:.1f} pts)."
+            )
         elif sl_dist_pts > 0:
             spread_pct_sl = (spread_pts / sl_dist_pts) * 100.0
-            if spread_pct_sl > 5.0:
-                rejections.append(f"Pre-check failed: Spread ({spread_pts:.1f} pts) is {spread_pct_sl:.2f}% of SL distance ({sl_dist_pts:.1f} pts), exceeding 5.0% limit.")
+            if spread_pct_sl > max_spread_pct:
+                rejections.append(
+                    f"Pre-check failed: Spread ({spread_pts:.1f} pts) is {spread_pct_sl:.2f}% of SL "
+                    f"distance ({sl_dist_pts:.1f} pts), exceeding {max_spread_pct:.1f}% limit."
+                )
 
         # 5. Position sizing and volume verification
         size_result = self.sizing.calculate_lot_size(
@@ -132,7 +152,9 @@ class OrderManager:
             entry_price=candidate.entry_price,
             stop_loss=candidate.stop_loss,
             risk_percent=self.config.risk.risk_percentage,
-            sizing_reference=self.config.risk.sizing_reference
+            sizing_reference=self.config.risk.sizing_reference,
+            adaptive_scalping=is_scalp_signal and (getattr(self.config, "risk_profile", "") == "ADAPTIVE_SCALPING"),
+            min_rr_override=float(getattr(self.config.risk, "scalping_min_risk_reward_ratio", 1.2)) if is_scalp_signal else None,
         )
         if not size_result.is_approved:
             rejections.append(f"Pre-check failed (Sizing): {size_result.rejection_reason}")
@@ -159,7 +181,7 @@ class OrderManager:
 
         # 9. Is setup still available? (Check price deviation from entry price)
         deviation = abs(symbol_info.ask - candidate.entry_price) if candidate.direction == OrderType.BUY else abs(symbol_info.bid - candidate.entry_price)
-        max_dev = 5.0 * symbol_info.point * 10
+        max_dev = max(5.0 * symbol_info.point * 10, sl_distance * 0.35) if is_scalp_signal else (5.0 * symbol_info.point * 10)
         if deviation > max_dev and symbol_info.ask > 0:
             rejections.append(f"Pre-check failed: Price drifted {deviation/symbol_info.point:.1f} points away from entry.")
 
@@ -346,13 +368,19 @@ class OrderManager:
         account: AccountInfo,
         symbol_info: SymbolInfo,
         active_positions: List[Position],
-        recent_candles: Optional[List[Candle]] = None
+        recent_candles: Optional[List[Candle]] = None,
+        prevalidated: Optional[PreTradeCheckResult] = None,
     ) -> Optional[TradeOrder]:
         """
         Executes pre-trade validation, then submits order to MT5 Bridge
         or simulates order execution in SIMULATION mode.
+
+        When `prevalidated` is supplied the orchestrator's already-executed
+        checklist is reused instead of running the full checklist twice.
         """
-        check = self.run_pre_trade_checklist(candidate, account, symbol_info, active_positions, recent_candles=recent_candles)
+        check = prevalidated or self.run_pre_trade_checklist(
+            candidate, account, symbol_info, active_positions, recent_candles=recent_candles
+        )
         if not check.passed:
             candidate.status = "REJECTED"
             candidate.rejection_reasons.extend(check.rejection_reasons)
@@ -402,19 +430,72 @@ class OrderManager:
             candidate.status = "EXECUTED"
             return order
 
+        # Calculate accurate monetary risk percent for MT5 Bridge
+        bal = account.balance if account.balance > 0 else 10000.0
+        risk_pct = round((check.monetary_risk / bal) * 100.0, 2) if check.monetary_risk > 0 else float(self.config.risk.max_risk_per_trade_percent)
+
         # Mode: DEMO or REAL Live Execution via MT5 Bridge
+        req_id = f"REQ_{candidate.symbol}_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6].upper()}"
         res = self.bridge.execute_trade(
             symbol=candidate.symbol,
             order_type=candidate.direction,
             volume=check.calculated_volume,
             stop_loss=candidate.stop_loss,
             take_profit=candidate.take_profit,
+            price=candidate.entry_price,
+            risk_percent=risk_pct,
             magic=self.config.magic_number,
-            comment=f"SMC_{candidate.setup_type.value}"
+            comment=f"SMC_{candidate.setup_type.value}",
+            request_id=req_id
         )
 
+        # Handle IPC Timeout with immediate reconciliation recovery
+        res = res if isinstance(res, dict) else {}
+        if res.get("status") == "ERROR" and ("timed out" in str(res.get("message", "")).lower() or "timeout" in str(res.get("message", "")).lower()):
+            logger.warning(f"[ORDER_MANAGER] Execution timed out awaiting response for {candidate.symbol} ({req_id}). Checking MT5 positions/orders...")
+            # Query existing open positions to check if MT5 actually filled the trade
+            try:
+                open_positions = self.bridge.get_positions()
+                for pos in open_positions:
+                    if (
+                        pos.symbol == candidate.symbol
+                        and pos.order_type == candidate.direction
+                        and abs(pos.volume - check.calculated_volume) < 1e-4
+                        and (pos.magic == self.config.magic_number or "SMC" in pos.comment or "SCALP" in pos.comment)
+                    ):
+                        logger.info(f"[ORDER_MANAGER] Reconciled timed-out order #{pos.ticket} as successfully FILLED in MT5!")
+                        res = {"status": "SUCCESS", "ticket": pos.ticket, "price": pos.open_price, "retcode": 10009}
+                        break
+            except Exception as e:
+                logger.error(f"[ORDER_MANAGER] Error during timed-out order reconciliation: {e}")
+
+        # MT5 fill confirmation: only treat the order as executed when the bridge reports SUCCESS,
+        # a positive position/order ticket, and (if supplied) a successful trade retcode.
+        res = res if isinstance(res, dict) else {}
+        try:
+            confirmed_ticket = int(res.get("ticket", 0) or 0)
+        except (TypeError, ValueError):
+            confirmed_ticket = 0
+        retcode = res.get("retcode")
+        retcode_ok = retcode is None or int(retcode) in (10008, 10009, 10010)
+        if res.get("status") == "SUCCESS" and (confirmed_ticket <= 0 or not retcode_ok):
+            candidate.status = "REJECTED"
+            err_msg = f"MT5 did not confirm execution (ticket={confirmed_ticket}, retcode={retcode})"
+            candidate.rejection_reasons.append(err_msg)
+            return TradeOrder(
+                symbol=candidate.symbol,
+                order_type=candidate.direction,
+                volume=check.calculated_volume,
+                entry_price=candidate.entry_price,
+                stop_loss=candidate.stop_loss,
+                take_profit=candidate.take_profit,
+                magic=self.config.magic_number,
+                status="REJECTED",
+                error=err_msg
+            )
+
         if res.get("status") == "SUCCESS":
-            ticket = int(res.get("ticket", 0))
+            ticket = confirmed_ticket
             if check.trade_plan and ticket > 0:
                 self._active_trade_plans[ticket] = check.trade_plan
             order = TradeOrder(
@@ -435,8 +516,19 @@ class OrderManager:
             return order
         else:
             candidate.status = "REJECTED"
-            candidate.rejection_reasons.append(f"MT5 execution error: {res.get('message')}")
-            return None
+            err_msg = str(res.get('message') or "MT5 bridge rejected trade request")
+            candidate.rejection_reasons.append(f"MT5 execution error: {err_msg}")
+            return TradeOrder(
+                symbol=candidate.symbol,
+                order_type=candidate.direction,
+                volume=check.calculated_volume,
+                entry_price=candidate.entry_price,
+                stop_loss=candidate.stop_loss,
+                take_profit=candidate.take_profit,
+                magic=self.config.magic_number,
+                status="REJECTED",
+                error=err_msg
+            )
 
     def get_active_positions(self) -> List[Position]:
         """Returns active positions depending on operating mode."""
