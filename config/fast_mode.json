@@ -59,7 +59,7 @@
     "spread_spike_multiplier": 3.0,
     "flatten_before_session_end_minutes": 5,
     "flatten_before_rollover": true,
-    "flatten_before_high_impact_news": true
+    "flatten_before_high_impact_news": false
   },
   "risk_guardrails": {
     "max_risk_percent_per_trade": 1.0,

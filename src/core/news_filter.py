@@ -1,12 +1,13 @@
 """
-Economic News and No-Trade Window Guard.
-Filters high-impact macroeconomic announcements (CPI, NFP, FOMC, Central Bank Rate decisions).
-Implements fail-safe protection policies.
+Legacy NewsFilterEngine Compatibility Stub.
+Economic-calendar and news-based trading restrictions have been completely removed
+from the trading decision pipeline per the Continuous Scalping Engine architecture.
+Ordinary execution protections (spread, quote validity, slippage) remain in OrderManager.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
 
@@ -14,8 +15,8 @@ from typing import List, Optional, Tuple
 class EconomicNewsEvent:
     id: str
     title: str
-    currency: str  # e.g. "USD", "EUR", "GBP", "JPY"
-    impact: str    # "HIGH", "MEDIUM", "LOW"
+    currency: str
+    impact: str
     timestamp: datetime
     actual: Optional[str] = None
     forecast: Optional[str] = None
@@ -23,57 +24,37 @@ class EconomicNewsEvent:
 
 
 class NewsFilterEngine:
+    """
+    No-op compatibility stub: news-based trade blocking is permanently disabled.
+    Always permits trading so the continuous scalping engine never waits for or blocks on news.
+    """
     def __init__(
         self,
-        restrict_minutes_before: int = 30,
-        restrict_minutes_after: int = 30,
-        restrict_high_only: bool = True
+        restrict_minutes_before: int = 0,
+        restrict_minutes_after: int = 0,
+        restrict_high_only: bool = False,
+        enabled: bool = False,
     ):
-        self.restrict_before = timedelta(minutes=restrict_minutes_before)
-        self.restrict_after = timedelta(minutes=restrict_minutes_after)
-        self.restrict_high_only = restrict_high_only
+        self.enabled = False
+        self.restrict_before = timedelta(minutes=0)
+        self.restrict_after = timedelta(minutes=0)
+        self.restrict_high_only = False
         self._news_events: List[EconomicNewsEvent] = []
         self._feed_healthy: bool = True
 
     def register_events(self, events: List[EconomicNewsEvent]) -> None:
-        self._news_events = sorted(events, key=lambda x: x.timestamp)
-        self._feed_healthy = True
+        self._news_events = []
+
+    def clear_events(self) -> None:
+        self._news_events = []
 
     def set_feed_status(self, is_healthy: bool) -> None:
-        self._feed_healthy = is_healthy
+        self._feed_healthy = True
 
     def is_trading_allowed(
         self,
         symbol: str,
         current_time: Optional[datetime] = None
     ) -> Tuple[bool, Optional[str]]:
-        """
-        Determines whether trading is permitted for the given symbol.
-        Checks base and quote currency against upcoming/recent high-impact releases.
-        """
-        # Fail-safe check
-        if not self._feed_healthy:
-            return True, None  # Allow trading with warning or set to False if strict mode configured
-
-        now = current_time or datetime.now(timezone.utc)
-        # Parse currency from symbol (e.g. EURUSD -> EUR, USD; XAUUSD -> USD)
-        currencies = [symbol[:3], symbol[3:6]] if len(symbol) >= 6 else [symbol]
-
-        for ev in self._news_events:
-            if self.restrict_high_only and ev.impact != "HIGH":
-                continue
-            if ev.currency not in currencies:
-                continue
-
-            # Check window: [event_time - restrict_before, event_time + restrict_after]
-            window_start = ev.timestamp - self.restrict_before
-            window_end = ev.timestamp + self.restrict_after
-
-            if window_start <= now <= window_end:
-                mins_diff = int((ev.timestamp - now).total_seconds() / 60)
-                timing = f"in {mins_diff} min" if mins_diff >= 0 else f"{abs(mins_diff)} min ago"
-                return False, (
-                    f"No-Trade news window active: {ev.impact} impact '{ev.title}' ({ev.currency}) {timing}."
-                )
-
+        """Always returns (True, None) — news trading restrictions are completely removed."""
         return True, None

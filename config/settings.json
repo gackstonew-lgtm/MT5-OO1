@@ -1,8 +1,40 @@
 {
   "execution_mode": "DEMO",
-  "symbols": ["BTCUSD.m", "EURUSD", "GBPUSD", "USDJPY", "XAUUSD"],
+  "TRADING_MODE": "CONTINUOUS_SCALPING",
+  "EXECUTION_TIMEFRAMES": [
+    "M1",
+    "M5"
+  ],
+  "CONTEXT_TIMEFRAMES": [
+    "M15",
+    "H1"
+  ],
+  "NEWS_FILTER_ENABLED": false,
+  "CONTINUOUS_SCANNING": true,
+  "ADAPTIVE_ENTRY_FILTERS": true,
+  "DYNAMIC_TAKE_PROFIT": true,
+  "BREAK_EVEN_ENABLED": true,
+  "TRAILING_STOP_ENABLED": true,
+  "PARTIAL_PROFIT_ENABLED": true,
+  "AUTO_RESCAN_AFTER_CLOSURE": true,
+  "MULTI_SYMBOL_EXECUTION": true,
+  "RISK_PROFILE": "ADAPTIVE_SCALPING",
+  "MAX_DAILY_LOSS_ENABLED": true,
+  "MAX_DRAWDOWN_PROTECTION_ENABLED": true,
+  "symbols": [
+    "BTCUSD.m",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "XAUUSD"
+  ],
   "primary_signal_timeframe": "M15",
-  "htf_timeframes": ["W1", "D1", "H4", "H1"],
+  "htf_timeframes": [
+    "W1",
+    "D1",
+    "H4",
+    "H1"
+  ],
   "bridge_host": "127.0.0.1",
   "bridge_port": 5555,
   "bridge_sub_port": 5556,
@@ -12,8 +44,22 @@
     "EURUSD": 2,
     "GBPUSD": 3,
     "USDJPY": 4,
-    "XAUUSD": 5
+    "XAUUSD": 5,
+    "GBPJPY.m": 6
   },
-  "poll_interval_seconds": 1.0,
-  "log_level": "INFO"
+  "dry_run": false,
+  "log_level": "INFO",
+  "telegram_enabled": true,
+  "upgrade": {
+    "enabled": false,
+    "broker_adapter_enabled": false,
+    "feature_pipeline_enabled": false,
+    "modular_strategy_enabled": false,
+    "scbf_enabled": false,
+    "chart_visualization_enabled": false,
+    "ab_harness_enabled": false,
+    "meta_labeling_enabled": false,
+    "bridge_extensions_enabled": false,
+    "validation_gates_enabled": false
+  }
 }

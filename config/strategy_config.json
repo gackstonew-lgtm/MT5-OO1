@@ -1,47 +1,69 @@
 {
-  "feature_flags": {
-    "account_size_adaptation": true,
-    "micro_account_min_lot_allowed": false,
-    "shadow_mode": true,
-    "regime_detection": false,
-    "meta_labeling": false,
-    "vol_forecast": false,
-    "vol_targeting": false,
-    "kelly_cap": false,
-    "exposure_limits": false,
-    "tca": false,
-    "decay_guard": false,
-    "llm_review": false
-  },
-  "confluence_scoring": {
-    "minimum_entry_score": 75.0,
-    "weights": {
-      "weekly_alignment": 15,
-      "daily_alignment": 15,
-      "h4_trend": 15,
-      "h1_confluence": 10,
-      "m15_mss_close": 15,
-      "liquidity_sweep": 10,
-      "fvg_quality": 10,
-      "order_block_quality": 5,
-      "session_killzone": 5
-    }
-  },
+  "trading_mode": "CONTINUOUS_SCALPING",
+  "execution_timeframes": [
+    "M1",
+    "M5"
+  ],
+  "context_timeframes": [
+    "M15",
+    "H1"
+  ],
+  "news_filter_enabled": false,
+  "continuous_scanning": true,
+  "adaptive_entry_filters": true,
+  "auto_rescan_after_closure": true,
+  "multi_symbol_execution": true,
+  "scalp_require_htf_agreement": true,
+  "continuous_scalp_require_htf_agreement": false,
+  "scalping_min_confluence_score": 45.0,
+  "scalping_min_rr": 1.2,
+  "micro_account_min_lot_allowed": false,
+  "acknowledged_high_risk_microaccount": false,
+  "adaptive_scalping_min_lot_ceiling_pct": 3.5,
   "ict_smc": {
-    "allow_countertrend": false,
-    "countertrend_risk_multiplier": 0.5,
     "swing_lookback_bars": 5,
-    "fvg_min_pip_threshold": 1.5,
-    "displacement_body_to_range_min": 0.6,
-    "ote_fib_lower": 0.62,
-    "ote_fib_upper": 0.79,
-    "equal_high_low_threshold_pips": 2.0,
-    "scalp_require_htf_agreement": true,
+    "fvg_min_pips": 1.5,
+    "require_mss_close_confirmation": true,
     "require_close_break": true,
     "require_lower_high": true,
     "choch_timeout_bars": 20,
     "allow_choch_only_entries": true,
-    "failed_choch_action": "RESET_AND_LOG_TRAP"
+    "failed_choch_action": "RESET_AND_LOG_TRAP",
+    "ote_fibonacci_levels": {
+      "entry_zone_min": 0.62,
+      "entry_zone_max": 0.79,
+      "optimal_entry": 0.705,
+      "invalidation": 1.0
+    },
+    "allow_countertrend_setups": true,
+    "countertrend_risk_multiplier": 0.5,
+    "scalp_require_htf_agreement": true
   },
-  "scalp_require_htf_agreement": true
+  "confluence_scoring": {
+    "min_approval_score": 75.0,
+    "scalping_min_approval_score": 55.0,
+    "weights": {
+      "weekly_bias": 15.0,
+      "daily_bias": 15.0,
+      "h4_structure": 15.0,
+      "h1_alignment": 10.0,
+      "liquidity_sweep": 15.0,
+      "mss_bos_confirmation": 15.0,
+      "fvg_order_block_ote": 10.0,
+      "killzone_session": 5.0
+    }
+  },
+  "symbol_overrides": {
+    "BTCUSD.m": {
+      "W1": 30,
+      "D1": 150,
+      "H4": 250,
+      "H1": 400,
+      "M15": 500
+    }
+  },
+  "on_short_history": "REDUCE",
+  "reduced_history_risk_factor": 0.5,
+  "max_startup_rounds": 6,
+  "alert_cooldown_minutes": 15
 }

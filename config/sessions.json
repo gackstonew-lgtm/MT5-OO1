@@ -119,12 +119,5 @@
     "start_utc": "13:00",
     "end_utc": "16:00"
   },
-  "filter_spread_max_pips": 3.0,
-  "news_filter": {
-    "enabled": true,
-    "restrict_minutes_before": 30,
-    "restrict_minutes_after": 30,
-    "restrict_high_impact": true,
-    "restrict_medium_impact": false
-  }
+  "filter_spread_max_pips": 3.0
 }

@@ -12,6 +12,7 @@
   },
   "broker_buffer_points": 5.0,
   "candidate_timeframes": [
+    "M1",
     "M5",
     "M15",
     "M30",
@@ -38,6 +39,5 @@
     "start_minute": 55,
     "end_hour": 22,
     "end_minute": 15
-  },
-  "news_filter_buffer_minutes": 15
+  }
 }

@@ -7,8 +7,8 @@ Triggers institutional circuit breakers upon limit breach.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, date, timezone
-from typing import List, Dict, Optional, Set
+from datetime import datetime, date, timezone, timedelta
+from typing import List, Dict, Optional, Set, Any
 
 from src.core.contracts import Position, AccountInfo, SignalCandidate, OrderType, AccountProfile, DrawdownType
 from src.core.config import RiskConfig, AccountProfileConfig, PropFirmRulesConfig, get_default_account_profiles
@@ -56,6 +56,8 @@ class PortfolioRiskEngine:
         self.session_trades_count: int = 0
         self.last_deal_profit: float = 0.0
         self.last_deal_volume: float = 0.0
+        self.symbol_consecutive_losses: Dict[str, int] = {}
+        self.symbol_cooldown_until: Dict[str, datetime] = {}
         self.trading_days_count: int = 0
         self.last_known_balance: float = 0.0
 
@@ -175,6 +177,8 @@ class PortfolioRiskEngine:
         self.daily_realized_loss = 0.0
         self.weekly_realized_loss = 0.0
         self.consecutive_losses = 0
+        self.symbol_consecutive_losses.clear()
+        self.symbol_cooldown_until.clear()
         self.session_trades_count = 0
         self.trading_days_count = 0
         self.last_deal_profit = 0.0
@@ -225,14 +229,24 @@ class PortfolioRiskEngine:
             except Exception:
                 pass
 
-    def record_closed_trade(self, profit: float, volume: float = 0.01) -> None:
-        """Updates realized losses and consecutive win/loss streaks."""
+    def record_closed_trade(self, profit: float, volume: float = 0.01, symbol: Optional[str] = None) -> None:
+        """Updates realized losses, win/loss streaks and per-symbol cooldowns."""
         self.last_deal_profit = profit
         self.last_deal_volume = volume
+        sym_key = str(symbol).upper() if symbol else None
         if profit < 0:
             self.daily_realized_loss += abs(profit)
             self.weekly_realized_loss += abs(profit)
             self.consecutive_losses += 1
+
+            if sym_key:
+                self.symbol_consecutive_losses[sym_key] = self.symbol_consecutive_losses.get(sym_key, 0) + 1
+                trigger = int(getattr(self.config, "consecutive_loss_trigger", 2))
+                if self.symbol_consecutive_losses[sym_key] >= trigger:
+                    cooldown_min = int(getattr(self.config, "consecutive_loss_cooldown_minutes", 15))
+                    self.symbol_cooldown_until[sym_key] = (
+                        datetime.now(timezone.utc) + timedelta(minutes=cooldown_min)
+                    )
 
             if self.consecutive_losses >= self.config.max_consecutive_losses:
                 self._trigger_circuit_breaker(
@@ -254,6 +268,68 @@ class PortfolioRiskEngine:
                     )
         else:
             self.consecutive_losses = 0
+            if sym_key:
+                self.symbol_consecutive_losses.pop(sym_key, None)
+                self.symbol_cooldown_until.pop(sym_key, None)
+
+    def record_trade_result(self, profit: float, volume: float = 0.01, symbol: Optional[str] = None) -> None:
+        """Backward-compatible alias used by the orchestrator when a trade closes."""
+        self.record_closed_trade(profit=profit, volume=volume, symbol=symbol)
+
+    @property
+    def effective_risk_multiplier(self) -> float:
+        """Temporary risk reduction while a consecutive-loss streak is active."""
+        trigger = int(getattr(self.config, "consecutive_loss_trigger", 2))
+        if self.consecutive_losses >= trigger:
+            return float(getattr(self.config, "consecutive_loss_risk_reduction", 0.5))
+        return 1.0
+
+    @staticmethod
+    def _correlation_group(symbol: str) -> Optional[str]:
+        """Maps broker symbols to coarse correlation groups (USD / metals / crypto / FX)."""
+        s = str(symbol).upper()
+        root = s
+        for sfx in (".M", ".STD", ".PRO", ".ECN", "_ECN", ".RAW", ".A", ".R", ".C", ".I", "M", "+", "#"):
+            if root.endswith(sfx) and len(root) > len(sfx):
+                root = root[:-len(sfx)]
+                break
+        if root.startswith("XAU") or root.startswith("GOLD") or "XAG" in root:
+            return "METALS"
+        if "BTC" in root or "ETH" in root or "XRP" in root:
+            return "CRYPTO"
+        if root.startswith("EUR") or root.startswith("GBP") or root.startswith("AUD") or root.startswith("NZD"):
+            return "EUR_GBP_BLOC"
+        if root in ("USDJPY", "USDCHF", "USDCAD"):
+            return "USD_MAJORS"
+        return None
+
+    def _auto_recover_consecutive_loss_breaker(self) -> None:
+        """Consecutive-loss breakers pause trading temporarily instead of locking forever."""
+        if not self.circuit_breaker_active:
+            return
+        reason = self.circuit_breaker_reason or ""
+        if not reason.startswith("Max consecutive losses"):
+            return
+        cooldown_min = int(getattr(self.config, "consecutive_loss_cooldown_minutes", 15))
+        # Find the most recent streak event; pause is measured from it.
+        streak_time = None
+        for ev in reversed(self.risk_events):
+            if ev.event_type == "CIRCUIT_BREAKER_TRIGGERED" and ev.message.startswith("Max consecutive losses"):
+                streak_time = ev.timestamp
+                break
+        if streak_time is None:
+            return
+        if datetime.now(timezone.utc) >= streak_time + timedelta(minutes=cooldown_min):
+            self.circuit_breaker_active = False
+            self.circuit_breaker_reason = None
+            self.consecutive_losses = 0
+            self.risk_events.append(
+                RiskBreachEvent(
+                    event_type="AUTO_RECOVERY",
+                    message=f"Consecutive-loss pause elapsed after {cooldown_min} minutes; trading resumed.",
+                    severity="INFO",
+                )
+            )
 
     def evaluate_new_order_permission(
         self,
@@ -271,6 +347,19 @@ class PortfolioRiskEngine:
         self.initialize_day(account.equity)
         self.update_equity(account)
 
+        # Consecutive-loss pause is temporary; auto-recover once the cooldown elapses.
+        self._auto_recover_consecutive_loss_breaker()
+
+        # Check symbol-specific consecutive loss cooldown
+        sym_key = str(candidate.symbol).upper()
+        cooldown_until = self.symbol_cooldown_until.get(sym_key)
+        now_utc = datetime.now(timezone.utc)
+        if cooldown_until and now_utc < cooldown_until:
+            rem_sec = int((cooldown_until - now_utc).total_seconds())
+            consec = self.symbol_consecutive_losses.get(sym_key, 2)
+            return False, f"Symbol {candidate.symbol} in consecutive-loss cooldown ({consec} losses) for {rem_sec}s."
+
+
         # 0. Check Live/Prop Trading Enabled Gating
         if self.profile.profile_name in [AccountProfile.LIVE, AccountProfile.PROP]:
             account_enabled = getattr(account, "trading_enabled", False)
@@ -286,34 +375,38 @@ class PortfolioRiskEngine:
         if self.buffer_halted:
             return False, f"Trading paused: Safety buffer reached ({self.profile.safety_buffer_percent:.0f}% of limit)."
 
-        # 1c. Prop Firm Rule: Stop Loss strictly required
-        if self.profile.rules.require_sl:
+        # 1c. Retail Protective Stop Loss
+        if getattr(self.profile.rules, 'require_sl', True):
             if candidate.stop_loss <= 0.0:
-                return False, "Prop/Live Rule Violation: Stop Loss is strictly required on every trade."
+                return False, 'Risk Rule: Stop Loss is strictly required on every trade.'
 
-        # 1d. Prop Firm Rule: No Martingale
-        if self.profile.rules.no_martingale and self.last_deal_profit < 0.0:
-            if self.last_deal_volume > 0.0 and proposed_volume > self.last_deal_volume:
-                return False, f"Prop Rule Violation: Martingale detected (lot {proposed_volume:.2f} > previous losing lot {self.last_deal_volume:.2f})."
+        # 1d. Retail Mode: Martingale / lot escalation restriction
+        if getattr(self.profile.rules, 'no_martingale', False) and self.last_deal_profit < 0.0:
+            if self.last_deal_volume > 0.0 and proposed_volume > (self.last_deal_volume * 1.5):
+                return False, (
+                    f'Martingale detected: lot escalation after a loss '
+                    f'(proposed {proposed_volume:.2f} > 1.5x previous lot {self.last_deal_volume:.2f}).'
+                )
 
-        # 1e. Prop Firm Rule: No Grid / Averaging Down
-        if self.profile.rules.no_grid_averaging:
+        # 1e. Retail Mode: Grid / Averaging Down toggle
+        if getattr(self.profile.rules, 'no_grid_averaging', False):
             for p in active_positions:
                 if p.symbol == candidate.symbol and p.order_type == candidate.direction:
                     if p.profit < 0.0:
-                        return False, f"Prop Rule Violation: Grid/Averaging down prohibited while position #{p.ticket} is in drawdown (${p.profit:.2f})."
+                        return False, f'Risk Rule: Grid/Averaging down prohibited while position #{p.ticket} is in drawdown (${p.profit:.2f}).'
 
-        # 1f. Prop Firm Rule: No Hedging
-        if self.profile.rules.no_hedging:
+        # 1f. Retail Mode: Hedging toggle (permitted in retail)
+        if getattr(self.profile.rules, 'no_hedging', False):
             for p in active_positions:
                 if p.symbol == candidate.symbol and p.order_type != candidate.direction:
-                    return False, f"Prop Rule Violation: Hedging prohibited (opposite position #{p.ticket} active on {p.symbol})."
+                    return False, f'Risk Rule: Hedging prohibited (opposite position #{p.ticket} active on {p.symbol}).'
 
-        # 1g. Prop Firm Rule: No Weekend Holding
-        if self.profile.rules.no_weekend_holding:
+        # 1g. Retail Mode: Weekend Holding toggle
+        if getattr(self.profile.rules, 'no_weekend_holding', False):
             now_utc = datetime.now(timezone.utc)
-            if now_utc.weekday() == 4 and now_utc.hour >= self.profile.rules.weekend_close_hour_friday:
-                return False, f"Prop Rule Violation: Weekend holding prohibited after {self.profile.rules.weekend_close_hour_friday:02d}:00 Friday."
+            fri_hr = getattr(self.profile.rules, 'weekend_close_hour_friday', 22)
+            if now_utc.weekday() == 4 and now_utc.hour >= fri_hr:
+                return False, f'Risk Rule: Weekend holding prohibited after {fri_hr:02d}:00 Friday.'
 
         # 1h. Hard Lot Cap
         if proposed_volume > self.profile.rules.max_lot_cap:
@@ -355,13 +448,32 @@ class PortfolioRiskEngine:
                 f"${max_allowed_open_risk:.2f} ({self.config.max_aggregate_open_risk_percent}% of equity)."
             )
 
-        # 6. Correlated Symbol Exposure Protection
-        # Disallow more than 2 positions in opposite directions or identical base currencies
+        # 6. Per-symbol and correlated exposure protection
         same_symbol_positions = [p for p in active_positions if p.symbol == candidate.symbol]
+        max_per_symbol = int(getattr(self.config, 'max_positions_per_symbol', 0))
+        if max_per_symbol <= 0:
+            # 0 means "use the profile limit" rather than accidentally blocking at 1.
+            max_per_symbol = max(1, int(getattr(self.profile, 'max_open_positions', 1)))
+        if len(same_symbol_positions) >= max_per_symbol:
+            return False, f"Maximum simultaneous positions for {candidate.symbol} reached ({len(same_symbol_positions)}/{max_per_symbol})."
         if len(same_symbol_positions) > 0:
             for p in same_symbol_positions:
                 if p.order_type != candidate.direction:
                     return False, f"Conflicting open position exists on {candidate.symbol} in opposite direction."
+
+        max_correlated = int(getattr(self.config, 'max_correlated_positions', 2))
+        cand_group = self._correlation_group(candidate.symbol)
+        if cand_group and max_correlated > 0:
+            # Same-symbol stacking is governed by max_positions_per_symbol above.
+            correlated = [
+                p for p in active_positions
+                if p.symbol != candidate.symbol and self._correlation_group(p.symbol) == cand_group
+            ]
+            if len(correlated) >= max_correlated:
+                return False, (
+                    f"Correlation exposure limit reached: {len(correlated)}/{max_correlated} "
+                    f"positions already open in group '{cand_group}'."
+                )
 
         # 7. Max trades per session
         if self.session_trades_count >= self.config.max_trades_per_session:

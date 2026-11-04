@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 try:
     import MetaTrader5 as mt5
@@ -19,8 +19,8 @@ except ImportError:
     mt5 = None
     MT5_AVAILABLE = False
 
-from src.core.contracts import AccountInfo, SymbolInfo, OrderType, AccountTier
-from src.risk.account_tier import AccountTierManager, TierDefinition
+from src.core.contracts import AccountInfo, SymbolInfo, OrderType
+from src.risk.account_tier import AccountTierManager
 
 logger = logging.getLogger("PositionSizingEngine")
 
@@ -76,7 +76,10 @@ class PositionSizingEngine:
         risk_percent: Optional[float] = None,
         is_reduced_history: bool = False,
         sizing_reference: str = "CONSERVATIVE",
-        order_type: Optional[OrderType] = None
+        order_type: Optional[OrderType] = None,
+        adaptive_scalping: bool = False,
+        adaptive_min_lot_ceiling_pct: float = 3.5,
+        min_rr_override: Optional[float] = None,
     ) -> PositionSizeResult:
         """
         Stage 0A Single Shared Position Sizing Algorithm used by every order path:
@@ -86,8 +89,8 @@ class PositionSizingEngine:
         c. lots = floor(risk_money / loss_per_lot / volume_step) x volume_step, clamped.
         d. If lots >= volume_min: use it. Never round up.
         e. If lots < volume_min: compute real risk of minimum lot. If <= tier ceiling AND
-           micro_account_min_lot_allowed AND acknowledged_high_risk_microaccount: trade min lot.
-           Otherwise skip and report real risk %, needed lot, and minimum balance.
+           (micro_account_min_lot_allowed + acknowledged_high_risk_microaccount OR adaptive_scalping):
+           trade min lot. Otherwise skip and report real risk %, needed lot, and minimum balance.
         f. Every decision logs facts with units.
         """
         # Always reload operator flags to reflect live configs
@@ -100,12 +103,14 @@ class PositionSizingEngine:
         # Evaluate Account Tier
         tier_def, changed, tier_msg = self.tier_manager.evaluate_account(account)
         tier_name = tier_def.name
-        target_pct = tier_def.target_risk_pct if risk_percent is None else min(risk_percent, tier_def.target_risk_pct)
-        ceiling_pct = tier_def.absolute_ceiling_pct
-
         if is_reduced_history:
-            target_pct *= self.reduced_history_factor
-            ceiling_pct *= self.reduced_history_factor
+            effective_cap = min(self.max_risk_percent_per_trade, tier_def.absolute_ceiling_pct if tier_def.absolute_ceiling_pct > 0 else self.max_risk_percent_per_trade)
+            ceiling_pct = effective_cap * self.reduced_history_factor
+            requested_risk = risk_percent if risk_percent is not None else tier_def.target_risk_pct
+            target_pct = min(requested_risk, ceiling_pct)
+        else:
+            ceiling_pct = tier_def.absolute_ceiling_pct
+            target_pct = tier_def.target_risk_pct if risk_percent is None else min(risk_percent, tier_def.absolute_ceiling_pct)
 
         # Hard Floor Guard: < $5.00 disables trading immediately
         if capital_base < 5.0 or tier_name == "BELOW_FLOOR":
@@ -223,7 +228,7 @@ class PositionSizingEngine:
         commission_per_lot = 7.0  # $7 standard institutional roundturn commission
         total_loss_per_lot = base_loss_per_lot + spread_cost_per_lot + commission_per_lot
 
-        # 6. Check against minimum lot & Micro Account Adaptation
+        # 6. Check against minimum lot & Micro Account / Adaptive Scalping Adaptation
         min_lot = symbol_info.min_lot if symbol_info.min_lot > 0 else 0.01
         min_lot_loss = min_lot * total_loss_per_lot
         min_lot_risk_pct = (min_lot_loss / capital_base) * 100.0
@@ -236,23 +241,26 @@ class PositionSizingEngine:
             final_volume = min(quantized_volume, effective_max_lot)
         else:
             # Sized volume rounded down to zero or below min_lot
-            # Check micro-account min lot rules:
             flags_active = (
                 self.tier_manager.micro_account_min_lot_allowed
                 and self.tier_manager.acknowledged_high_risk_microaccount
             )
+            effective_ceiling = max(ceiling_pct, adaptive_min_lot_ceiling_pct) if adaptive_scalping else ceiling_pct
 
-            if flags_active and min_lot_risk_pct <= ceiling_pct:
+            if (flags_active and min_lot_risk_pct <= ceiling_pct) or (
+                adaptive_scalping and min_lot_risk_pct <= effective_ceiling and capital_base >= 5.0
+            ):
                 final_volume = min_lot
                 is_micro_exception = True
+                ceiling_pct = effective_ceiling
                 logger.warning(
-                    f"[SIZING] Micro-Account Exception Granted for {symbol_info.symbol}: "
-                    f"MinLot {min_lot:.2f} risks ${min_lot_loss:.2f} ({min_lot_risk_pct:.2f}% <= Ceiling {ceiling_pct:.2f}%)"
+                    f"[SIZING] {'Adaptive-Scalping' if adaptive_scalping else 'Micro-Account'} Exception Granted for {symbol_info.symbol}: "
+                    f"MinLot {min_lot:.2f} risks ${min_lot_loss:.2f} ({min_lot_risk_pct:.2f}% <= Ceiling {effective_ceiling:.2f}%)"
                 )
             else:
                 reason = (
                     f"Min lot {min_lot:.2f} risks ${min_lot_loss:.2f} ({min_lot_risk_pct:.2f}% of capital ${capital_base:.2f}), "
-                    f"exceeding target risk {target_pct:.2f}% (Ceiling: {ceiling_pct:.2f}%). "
+                    f"exceeding target risk {target_pct:.2f}% (Ceiling: {effective_ceiling:.2f}%, exceeding max risk cap). "
                     f"Required raw lot: {raw_volume:.4f}. Min balance needed: ${min_balance_needed:.2f}."
                 )
                 log_line = (
@@ -273,7 +281,7 @@ class PositionSizingEngine:
                     margin_required=0.0,
                     tier_name=tier_name,
                     target_risk_pct=target_pct,
-                    ceiling_risk_pct=ceiling_pct,
+                    ceiling_risk_pct=effective_ceiling,
                     min_balance_needed=round(min_balance_needed, 2),
                     raw_lots=round(raw_volume, 4),
                     is_micro_exception=False,
@@ -319,7 +327,7 @@ class PositionSizingEngine:
             total_tp_money = max(0.0, gross_tp - (final_volume * (spread_cost_per_lot + commission_per_lot)))
             rr = (total_tp_money / actual_monetary_risk) if actual_monetary_risk > 0 else 0.0
 
-            tier_min_rr = max(2.0, tier_def.min_reward_to_risk)
+            tier_min_rr = min_rr_override if min_rr_override is not None else max(2.0, tier_def.min_reward_to_risk)
             if rr < tier_min_rr:
                 rej = f"Reward:Risk ratio {rr:.2f} is below minimum {tier_min_rr:.1f} (SL: -${actual_monetary_risk:.2f}, TP: +${total_tp_money:.2f})"
                 log_line = f"[SIZING] REJECTED | Bal: {unit_str} | Tier: {tier_name} | Reason: {rej}"

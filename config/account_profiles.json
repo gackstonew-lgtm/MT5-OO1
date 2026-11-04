@@ -14,10 +14,10 @@
     "daily_reset_tz_offset": 0,
     "loss_streak_pause": 3,
     "max_trades_per_day": 10,
-    "max_spread_pct_of_sl": 5.0,
+    "max_spread_pct_of_sl": 35.0,
     "rules": {
-      "no_martingale": true,
-      "no_grid_averaging": true,
+      "no_martingale": false,
+      "no_grid_averaging": false,
       "no_hedging": false,
       "require_sl": true,
       "min_trade_duration_seconds": 0,
@@ -45,20 +45,20 @@
     "daily_reset_tz_offset": 0,
     "loss_streak_pause": 3,
     "max_trades_per_day": 8,
-    "max_spread_pct_of_sl": 5.0,
+    "max_spread_pct_of_sl": 35.0,
     "rules": {
-      "no_martingale": true,
-      "no_grid_averaging": true,
-      "no_hedging": true,
+      "no_martingale": false,
+      "no_grid_averaging": false,
+      "no_hedging": false,
       "require_sl": true,
-      "min_trade_duration_seconds": 30,
+      "min_trade_duration_seconds": 0,
       "max_lot_cap": 0.5,
-      "no_weekend_holding": true,
+      "no_weekend_holding": false,
       "weekend_close_hour_friday": 22,
-      "news_filter_enabled": true,
-      "news_block_minutes_before": 15,
-      "news_block_minutes_after": 15,
-      "forbid_tick_scalping": true
+      "news_filter_enabled": false,
+      "news_block_minutes_before": 0,
+      "news_block_minutes_after": 0,
+      "forbid_tick_scalping": false
     }
   },
   "PROP": {
@@ -76,20 +76,20 @@
     "daily_reset_tz_offset": 0,
     "loss_streak_pause": 3,
     "max_trades_per_day": 6,
-    "max_spread_pct_of_sl": 5.0,
+    "max_spread_pct_of_sl": 35.0,
     "rules": {
-      "no_martingale": true,
-      "no_grid_averaging": true,
-      "no_hedging": true,
+      "no_martingale": false,
+      "no_grid_averaging": false,
+      "no_hedging": false,
       "require_sl": true,
-      "min_trade_duration_seconds": 60,
+      "min_trade_duration_seconds": 0,
       "max_lot_cap": 0.5,
-      "no_weekend_holding": true,
+      "no_weekend_holding": false,
       "weekend_close_hour_friday": 21,
-      "news_filter_enabled": true,
-      "news_block_minutes_before": 15,
-      "news_block_minutes_after": 15,
-      "forbid_tick_scalping": true
+      "news_filter_enabled": false,
+      "news_block_minutes_before": 0,
+      "news_block_minutes_after": 0,
+      "forbid_tick_scalping": false
     }
   }
 }
