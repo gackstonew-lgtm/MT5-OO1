@@ -186,18 +186,14 @@ class PersistentBridgeServer:
                     status_provider=self._get_status_dict,
                     positions_provider=self._get_positions_list,
                     balance_provider=self._get_balance_dict,
-                    pause_handler=self._disable_trading_action,
-                    resume_handler=self._enable_trading_action,
-                    closeall_handler=self._close_all_action,
-                    killswitch_handler=self._kill_switch_action,
-                    enable_handler=self._enable_trading_action,
-                    disable_handler=self._disable_trading_action,
-                    feed_manager=self.feed_manager,
-                    reset_handler=self._reset_state_action,
                     pause_handler=self._pause_action,
                     resume_handler=self._resume_action,
                     closeall_handler=self._closeall_action,
-                    killswitch_handler=self._killswitch_action
+                    killswitch_handler=self._killswitch_action,
+                    enable_handler=self._enable_trading_action,
+                    disable_handler=self._disable_trading_action,
+                    feed_manager=self.feed_manager,
+                    reset_handler=self._reset_state_action
                 )
                 self.cmd_handler.set_symbol_choice_handler = self._set_symbol_choice_action
                 logger.info("[BridgeServer] Telegram Activity Feed & Command Handler active.")
