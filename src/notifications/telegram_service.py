@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Callable, Tuple
 
 from src.notifications.telegram_config import TelegramConfig
-from src.notifications.telegram_transport import TelegramTransport, escape_html, truncate_message
+from src.notifications.telegram_transport import TelegramTransport, escape_html, truncate_message, build_status_inline_keyboard
 
 logger = logging.getLogger("TelegramService")
 
@@ -846,12 +846,8 @@ class TelegramFeedManager:
             self._check_periodic_health_and_marketwatch()
             return
 
-        # Raw activity digests are ON-DEMAND ONLY unless verbose mode is enabled
-        push_digests = self.verbose or (
-            hasattr(self.notifier, "router")
-            and self.notifier.router._cfg.get("push_raw_activity_digests", False)
-        )
-        if not push_digests:
+        # Raw activity digests are dispatched when feed is enabled (unless quiet hours active or explicitly disabled)
+        if not self.feed_enabled or time.time() < self.muted_until:
             self._check_periodic_health_and_marketwatch()
             return
 
@@ -1368,6 +1364,64 @@ class TelegramCommandHandler:
         except Exception as e:
             self._reply(f'⚠️ Error evaluating Risk Fit: {e}')
 
+
+    def _handle_verbose(self, text: str) -> None:
+        parts = text.split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+        if sub in ("on", "true", "1"):
+            msg = self.feed_manager.set_verbose(True) if self.feed_manager else "Verbose ON"
+            self._reply(msg)
+        elif sub in ("off", "false", "0"):
+            msg = self.feed_manager.set_verbose(False) if self.feed_manager else "Verbose OFF"
+            self._reply(msg)
+        else:
+            self._reply("Usage: <code>/verbose on</code> or <code>/verbose off</code>")
+
+    def _handle_level(self, text: str) -> None:
+        parts = text.split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+        if sub in ("info", "debug", "decision"):
+            msg = self.feed_manager.set_level(sub) if self.feed_manager else f"Level set to {sub}"
+            self._reply(msg)
+        else:
+            self._reply("Usage: <code>/level info</code> | <code>/level debug</code> | <code>/level decision</code>")
+
+    def _handle_feed(self, text: str) -> None:
+        parts = text.split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+        if sub in ("on", "true", "1"):
+            msg = self.feed_manager.set_feed(True) if self.feed_manager else "Feed ON"
+            self._reply(msg)
+        elif sub in ("off", "false", "0"):
+            msg = self.feed_manager.set_feed(False) if self.feed_manager else "Feed OFF"
+            self._reply(msg)
+        else:
+            self._reply("Usage: <code>/feed on</code> or <code>/feed off</code>")
+
+    def _handle_mute(self, text: str) -> None:
+        parts = text.split()
+        try:
+            minutes = int(parts[1]) if len(parts) > 1 else 15
+            msg = self.feed_manager.mute(minutes) if self.feed_manager else f"Feed muted for {minutes}m"
+            self._reply(msg)
+        except ValueError:
+            self._reply("Usage: <code>/mute &lt;minutes&gt;</code> (e.g. <code>/mute 15</code> or <code>/mute 0</code> to unmute)")
+
+    def _handle_last(self, text: str) -> None:
+        parts = text.split()
+        count = 20
+        if len(parts) > 1:
+            try:
+                count = int(parts[1])
+            except ValueError:
+                count = 20
+        lines = self.feed_manager.get_last_lines(count) if self.feed_manager else []
+        if lines:
+            body = f"📜 <b>LAST {len(lines)} ACTIVITY EVENTS:</b>\n<pre>" + "\n".join([escape_html(l) for l in lines]) + "</pre>"
+            self._reply(truncate_message(body))
+        else:
+            self._reply("<i>No activity lines logged yet.</i>")
+
     def _handle_help(self) -> None:
         self._reply(self._get_help_text())
 
@@ -1443,6 +1497,56 @@ class TelegramCommandHandler:
                 st["active_session"] = "London / NY"
 
         body = self.notifier.renderer.render_pinned_status_card(st)
+
+        # Append aggregate portfolio risk section if present
+        if 'total_open_risk_money' in st or 'symbols' in st:
+            total_open_risk = st.get('total_open_risk_money', 0.0)
+            total_open_risk_bal = st.get('total_open_risk_bal_pct', 0.0)
+            total_open_risk_eq = st.get('total_open_risk_eq_pct', 0.0)
+            max_open_risk_pct = st.get('max_total_open_risk_pct', 5.0)
+
+            risk_summary = (
+                f"\n\n🛡️ <b>AGGREGATE PORTFOLIO RISK:</b>\n"
+                f"• Total Open Risk: <code>${total_open_risk:.2f}</code> "
+                f"(<code>{total_open_risk_bal:.2f}% bal</code> / <code>{total_open_risk_eq:.2f}% eq</code>) "
+                f"vs Max Limit <code>{max_open_risk_pct:.2f}%</code>\n"
+            )
+            body += risk_summary
+
+        # Append per-symbol specifications & open risk table if present
+        symbols_list = st.get('symbols', [])
+        if symbols_list:
+            per_sym_table = "\n📋 <b>PER-SYMBOL SPECIFICATIONS &amp; RISK TABLE:</b>\n"
+            for s in symbols_list:
+                s_name = s.get('symbol', 'EURUSD')
+                s_state = s.get('state', 'READY')
+                c_size = s.get('contract_size', 100.0)
+                t_val = s.get('tick_value', 1.0)
+                t_sz = s.get('tick_size', 0.01)
+                min_l = s.get('min_lot', 0.01)
+                step_l = s.get('step_lot', 0.01)
+                max_l = s.get('max_lot', 0.03)
+                sp_pts = s.get('spread_pts', 0)
+                sp_m = s.get('spread_money', 0.0)
+                atr_pts = s.get('atr_pts', 200.0)
+                sample_l = s.get('sample_lot', 0.0)
+                sample_m = s.get('sample_risk_money', 0.0)
+                sample_pct = s.get('sample_risk_pct', 0.0)
+                open_pos = s.get('open_positions', 0)
+                open_m = s.get('open_risk_money', 0.0)
+                open_bal = s.get('open_risk_bal_pct', 0.0)
+                open_eq = s.get('open_risk_eq_pct', 0.0)
+
+                sample_str = f"Lot {sample_l:.2f} risks ${sample_m:.2f} ({sample_pct:.2f}% bal)" if sample_l > 0 else f"Lot 0.00 (Min lot {min_l:.2f} risks ${sample_m:.2f}, {sample_pct:.2f}% bal > Cap -> SKIPPED)"
+
+                per_sym_table += (
+                    f"• <b>{escape_html(s_name)}</b> [<code>{s_state}</code>]:\n"
+                    f"  - Spec: Contract <code>{c_size:g}</code> | TickVal <code>${t_val:.2f}</code> | TickSz <code>{t_sz:g}</code> | Lot: min <code>{min_l:.2f}</code> / step <code>{step_l:.2f}</code> / max <code>{max_l:.2f}</code>\n"
+                    f"  - Spread: <code>{sp_pts} pts (${sp_m:.2f})</code>\n"
+                    f"  - Sample 1x ATR Stop ({atr_pts:.1f} pts): <code>{sample_str}</code>\n"
+                    f"  - Open Risk: <code>{open_pos} pos | ${open_m:.2f} ({open_bal:.2f}% bal / {open_eq:.2f}% eq)</code>\n"
+                )
+            body += per_sym_table
 
         # If _reply was not monkeypatched by a test, send with inline buttons and update pinned card
         if getattr(self._reply, "__func__", None) is TelegramCommandHandler._reply:

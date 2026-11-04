@@ -263,6 +263,12 @@ python -m unittest discover -s tests -v
 python scripts/verify_deep.py
 ```
 
+### Run Continuous Scalping Upgrade & 20-Trade Suite
+```bash
+python scripts/run_20_trade_validation_suite.py
+python -m unittest tests/test_continuous_scalping_upgrade.py -v
+```
+
 ### Run Risk Sizing and Noise Suppression Verification
 ```bash
 python scripts/verify_risk_and_noise.py
