@@ -1,6 +1,6 @@
 # MASTER ENGINEERING & VALIDATION REPORT: MT5 ALGORITHMIC SCALPING BOT
 
-**Generated At:** `2026-11-04T10:14:06.171925+00:00`  
+**Generated At:** `2026-11-04T10:34:43.152488+00:00`  
 **Account Mode:** `DEMO (JustMarkets-Demo3, Safe Simulation / Dry-Run)`  
 **Starting Demo Equity:** `$2,329.71` | **Simulated Ending Equity:** `$2,471.52`
 
@@ -68,13 +68,13 @@ The MT5 Algorithmic Scalping System (`PythonBridgeEA.mq5` + Python ICT/SMC Multi
 
 | # | Scenario Code | Symbol (TF) | Guard / Filter Tested | Outcome / Rejection Reason | Status |
 | :-: | :--- | :--- | :--- | :--- | :---: |
-| 21 | `V01_HTF_CONFLICT_REJECTION` | `EURUSD.m` (M15) | `HTF_CONFLICT_FILTER` | Candidate M15_SMC_OTE rejected: Confluence score 70.0 is below minimum 75.0 | **PASS** |
+| 21 | `V01_HTF_CONFLICT_REJECTION` | `EURUSD.m` (M15) | `HTF_CONFLICT_FILTER` | Candidate M15_SMC_OTE rejected: Confluence score 65.0 is below minimum 75.0 | **PASS** |
 | 22 | `V02_INSUFFICIENT_HISTORY_REJECTION` | `XAUUSD.m` (M15) | `DATA_GUARD` | Insufficient M15 candle history (have 0, required 20) | **PASS** |
-| 23 | `V03_AUTOMATIC_HISTORY_RECOVERY` | `XAUUSD.m` (M15) | `HISTORY_RECOVERY` | Recovered 120 M15 bars; cycle advanced to strategy scan (Candidate M15_SMC_OTE rejected: Confluence score 70.0 is below minimum 75.0) | **PASS** |
+| 23 | `V03_AUTOMATIC_HISTORY_RECOVERY` | `XAUUSD.m` (M15) | `HISTORY_RECOVERY` | Recovered 120 M15 bars; cycle advanced to strategy scan (Candidate M15_SMC_OTE rejected: Confluence score 65.0 is below minimum 75.0) | **PASS** |
 | 24 | `V04_STALE_DATA_REJECTION` | `GBPUSD.m` (M15) | `STALE_DATA_GUARD` | Stale M15 market data for GBPUSD: latest closed bar is 396900s old (max allowed 1800s) | **PASS** |
-| 25 | `V05_EXCESSIVE_SPREAD_REJECTION` | `EURUSD.m` (M15) | `SPREAD_GUARD` | Pre-check failed: Spread (85.0 pts) is 85.00% of SL distance (100.0 pts), exceeding 5.0% limit.; Pre-check failed: Price drifted 85.0 points away from entry. | **PASS** |
+| 25 | `V05_EXCESSIVE_SPREAD_REJECTION` | `EURUSD.m` (M15) | `SPREAD_GUARD` | Pre-check failed: MT5 bridge connection unhealthy or unreachable.; Pre-check failed: Spread (85.0 pts) is 85.00% of SL distance (100.0 pts), exceeding 5.0% limit.; Pre-check failed: Price drifted 85.0 points away from entry. | **PASS** |
 | 26 | `V06_NEWS_FILTER_REMOVED` | `XAUUSD.m` (M15) | `NEWS_FILTER_REMOVED` | News filter disabled (allowed=True); pipeline proceeded to Insufficient M15 candle history (have 0, required 20) | **PASS** |
-| 27 | `V07_DAILY_LOSS_CIRCUIT_BREAKER` | `EURUSD.m` (M15) | `DAILY_LOSS_GUARD` | Pre-check failed (Portfolio Risk): Portfolio Circuit Breaker is ACTIVE: Hard drawdown limit breached! Daily: 7.83% (limit 5.0%), DD: 7.83% (limit 10.0%) | **PASS** |
+| 27 | `V07_DAILY_LOSS_CIRCUIT_BREAKER` | `EURUSD.m` (M15) | `DAILY_LOSS_GUARD` | Pre-check failed: MT5 bridge connection unhealthy or unreachable.; Pre-check failed (Portfolio Risk): Portfolio Circuit Breaker is ACTIVE: Hard drawdown limit breached! Daily: 7.59% (limit 5.0%), DD: 7.59% (limit 10.0%) | **PASS** |
 | 28 | `V08_DUPLICATE_SIGNAL_PREVENTION` | `EURUSD.m` (M15) | `IDEMPOTENCY_GUARD` | Duplicate signal blocked for key EURUSD_BUY_2026-11-03T15:00:00+00:00 | **PASS** |
 
 ## 7. Aggregate Performance Summary (20 Completed Trades)

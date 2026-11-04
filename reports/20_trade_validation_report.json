@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-04T10:14:06.171925+00:00",
+  "generated_at": "2026-11-04T10:34:43.152488+00:00",
   "account_mode": "DEMO (JustMarkets-Demo3, Safe Simulation / Dry-Run)",
   "starting_equity_usd": 2329.71,
   "ending_equity_usd": 2471.52,
@@ -587,7 +587,7 @@
       "mae_usd": 0.0,
       "rr_achieved": 0.0,
       "planned_rr": 0.0,
-      "exit_reason": "Candidate M15_SMC_OTE rejected: Confluence score 70.0 is below minimum 75.0",
+      "exit_reason": "Candidate M15_SMC_OTE rejected: Confluence score 65.0 is below minimum 75.0",
       "pass_status": "PASS",
       "verification_notes": "Confirmed orchestrator rejected M15 bullish setup when H1/H4/D1 were bearish."
     },
@@ -641,7 +641,7 @@
       "mae_usd": 0.0,
       "rr_achieved": 0.0,
       "planned_rr": 0.0,
-      "exit_reason": "Recovered 120 M15 bars; cycle advanced to strategy scan (Candidate M15_SMC_OTE rejected: Confluence score 70.0 is below minimum 75.0)",
+      "exit_reason": "Recovered 120 M15 bars; cycle advanced to strategy scan (Candidate M15_SMC_OTE rejected: Confluence score 65.0 is below minimum 75.0)",
       "pass_status": "PASS",
       "verification_notes": "Proved automatic transition from 0 bars to full multi-timeframe history and normal scanning."
     },
@@ -695,7 +695,7 @@
       "mae_usd": 0.0,
       "rr_achieved": 0.0,
       "planned_rr": 2.5,
-      "exit_reason": "Pre-check failed: Spread (85.0 pts) is 85.00% of SL distance (100.0 pts), exceeding 5.0% limit.; Pre-check failed: Price drifted 85.0 points away from entry.",
+      "exit_reason": "Pre-check failed: MT5 bridge connection unhealthy or unreachable.; Pre-check failed: Spread (85.0 pts) is 85.00% of SL distance (100.0 pts), exceeding 5.0% limit.; Pre-check failed: Price drifted 85.0 points away from entry.",
       "pass_status": "PASS",
       "verification_notes": "Confirmed pre-trade checklist blocks trade when spread exceeds max threshold."
     },
@@ -749,7 +749,7 @@
       "mae_usd": 0.0,
       "rr_achieved": 0.0,
       "planned_rr": 2.5,
-      "exit_reason": "Pre-check failed (Portfolio Risk): Portfolio Circuit Breaker is ACTIVE: Hard drawdown limit breached! Daily: 7.83% (limit 5.0%), DD: 7.83% (limit 10.0%)",
+      "exit_reason": "Pre-check failed: MT5 bridge connection unhealthy or unreachable.; Pre-check failed (Portfolio Risk): Portfolio Circuit Breaker is ACTIVE: Hard drawdown limit breached! Daily: 7.59% (limit 5.0%), DD: 7.59% (limit 10.0%)",
       "pass_status": "PASS",
       "verification_notes": "Confirmed daily loss circuit breaker halts new trade entries when daily drawdown threshold is breached."
     },
